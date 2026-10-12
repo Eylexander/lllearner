@@ -37,7 +37,9 @@ Push a `v*` tag (`git tag v1.0.0 && git push origin v1.0.0`). The "Release APK" 
 tests, builds the APK signed with the release key from the `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASS`
 secrets, and publishes it as a GitHub release. The version name comes from the tag and the versionCode from the run
 number. The app is distributed through [Eylexander/fdroid](https://github.com/Eylexander/fdroid), which picks up new
-releases within 6 hours.
+releases within 6 hours. The build steps are shared with the other apps of that repo
+([`flutter-apk.yml`](https://github.com/Eylexander/fdroid/blob/main/.github/workflows/flutter-apk.yml)), and so is
+the store listing (`metadata/com.eylexander.lllearner/`).
 
 The secrets hold `.secrets/release.p12.b64` and `.secrets/password.txt`. Every release must be signed with this same
 key (SHA-256 `db171ead…`, shared with Audio Cutter), or phones refuse the update.
