@@ -1,32 +1,121 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import 'exercise.dart';
+import 'lesson.dart';
 import 'store.dart';
+import 'theme.dart';
+import 'widgets.dart';
 
-enum _Kind { meaning, write, listen }
+enum Mode {
+  mixed('Quiz mixte', '10 questions variées sur vos mots', Icons.quiz_outlined, [
+    Kind.meaning,
+    Kind.recall,
+    Kind.listen,
+    Kind.tones,
+  ]),
+  listen('Écoute', 'Reconnaître les mots à l’oreille', Icons.hearing, [Kind.listen]),
+  tones('Tons', 'Retrouver les bons tons d’un mot', Icons.graphic_eq, [Kind.tones]),
+  weak('Points faibles', 'Vos erreurs récentes et mots difficiles', Icons.healing_outlined, [
+    Kind.meaning,
+    Kind.recall,
+    Kind.listen,
+  ]);
 
-class _Q {
-  _Q(this.word, this.options, this.kind);
-  final Word word;
-  final List<Word> options;
-  final _Kind kind;
+  const Mode(this.title, this.subtitle, this.icon, this.kinds);
+  final String title, subtitle;
+  final IconData icon;
+  final List<Kind> kinds;
 }
 
-class QuizScreen extends StatefulWidget {
-  const QuizScreen({super.key, required this.go});
-  final ValueChanged<int> go;
+/// Words a quiz may ask about: only learned ones, never the rest of the deck.
+List<Word> _targets(Mode mode) => mode == Mode.weak
+    ? {...store.mistakes.map(store.byKey).whereType<Word>(), ...store.learned.where((w) => w.weak)}.toList()
+    : store.learned.toList();
+
+const _minLearned = 4;
+
+/// The "Pratiquer" tab.
+class PracticeTab extends StatelessWidget {
+  const PracticeTab({super.key});
 
   @override
-  State<QuizScreen> createState() => _QuizScreenState();
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final learned = store.learned.length;
+    if (learned < _minLearned) {
+      final next = store.nextLesson;
+      return EmptyState(
+        icon: Icons.quiz_outlined,
+        title: 'Apprenez d’abord quelques mots',
+        message:
+            'Les quiz portent uniquement sur les mots vus en leçon. '
+            'Encore ${_minLearned - learned} mot${_minLearned - learned > 1 ? 's' : ''} et c’est parti !',
+        actions: [
+          if (next != null)
+            FilledButton.icon(
+              onPressed: () => LessonPage.open(context, next),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Continuer le cours'),
+            ),
+        ],
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+          child: Text(
+            'Entraînez-vous sur les $learned mots que vous avez appris.',
+            style: tt.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ),
+        for (final mode in Mode.values) ...[
+          () {
+            final n = _targets(mode).length;
+            final ok = mode == Mode.weak ? n > 0 : true;
+            return Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                enabled: ok,
+                onTap: () => QuizSession.open(context, mode),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                leading: CircleAvatar(
+                  backgroundColor: ok ? cs.secondaryContainer : cs.surfaceContainerHighest,
+                  child: Icon(mode.icon, color: ok ? cs.onSecondaryContainer : cs.outline),
+                ),
+                title: Text(mode.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(ok ? mode.subtitle : 'Aucun mot difficile pour l’instant, bravo !'),
+                trailing: const Icon(Icons.chevron_right),
+              ),
+            );
+          }(),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
 }
 
-class _QuizScreenState extends State<QuizScreen> {
+class QuizSession extends StatefulWidget {
+  const QuizSession(this.mode, {super.key});
+  final Mode mode;
+
+  static Future<void> open(BuildContext context, Mode mode) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => QuizSession(mode)));
+
+  @override
+  State<QuizSession> createState() => _QuizSessionState();
+}
+
+class _QuizSessionState extends State<QuizSession> {
   final rng = Random();
-  late List<_Q> qs;
+  late List<Exercise> qs;
+  final missed = <Word>[];
   int i = 0, score = 0;
-  Word? picked;
 
   @override
   void initState() {
@@ -34,264 +123,121 @@ class _QuizScreenState extends State<QuizScreen> {
     restart();
   }
 
+  /// Ten questions; weak words (lapses, recent mistakes, short intervals) come up more.
   void restart() {
-    // Quiz on studied words when there are enough, otherwise on everything; only words
-    // with a French meaning (dictionary-only words have a Mandarin definition instead).
-    final quizzable = store.words.where((w) => w.fr.isNotEmpty);
-    final seen = quizzable.where((w) => !w.isNew).toList();
-    final pool = seen.length >= 4 ? seen : [...quizzable];
-    final targets = (pool..shuffle(rng)).take(10);
-    qs = [
-      for (final w in targets)
-        () {
-          // Same-theme distractors first; never two options that sound or translate alike.
-          final others = quizzable.where((o) => o.lang == w.lang && o.roman != w.roman && o.fr != w.fr).toList()
-            ..shuffle(rng);
-          final opts = [
-            w,
-            ...[...others.where((o) => o.tag == w.tag), ...others.where((o) => o.tag != w.tag)].take(3),
-          ]..shuffle(rng);
-          // Listening only for words that have a recording.
-          return _Q(w, opts, _Kind.values[rng.nextInt(w.hasAudio ? _Kind.values.length : 2)]);
-        }(),
-    ];
+    final targets = _targets(widget.mode);
+    final pool = distractorPool(targets);
+    double weight(Word w) =>
+        1 + 2 * w.lapses + (store.mistakes.contains(w.key) ? 3 : 0) + (w.interval < 3 ? 1 : 0) + (w.ease < 2.3 ? 1 : 0);
+    final picked = <Word>[];
+    final left = [...targets];
+    while (picked.length < 10 && left.isNotEmpty) {
+      var r = rng.nextDouble() * left.fold(0.0, (s, w) => s + weight(w));
+      final w = left.firstWhere((w) => (r -= weight(w)) <= 0, orElse: () => left.last);
+      picked.add(w);
+      left.remove(w);
+    }
+    qs = [for (final w in picked) ?_exercise(w, pool)];
     i = score = 0;
-    picked = null;
-    prefetch(qs.map((q) => q.word));
-    _autoplay();
+    missed.clear();
   }
 
-  void _autoplay() {
-    if (i < qs.length && qs[i].kind == _Kind.listen) play(qs[i].word);
-  }
-
-  void answer(Word o) {
-    if (picked != null) return;
-    final q = qs[i];
-    final ok = o == q.word;
-    ok ? HapticFeedback.lightImpact() : HapticFeedback.heavyImpact();
-    setState(() {
-      picked = o;
-      if (ok) score++;
-    });
-    if (q.kind != _Kind.listen) play(q.word);
-    store.quizAnswer(q.word, ok);
-  }
-
-  void next() {
-    setState(() {
-      i++;
-      picked = null;
-    });
-    _autoplay();
+  /// A question of one of the mode's kinds the word allows, else a meaning question.
+  Exercise? _exercise(Word w, List<Word> pool) {
+    for (final k in widget.mode.kinds.toList()..shuffle(rng)) {
+      if (makeExercise(w, k, pool, rng) case final ex?) return ex;
+    }
+    return makeExercise(w, Kind.meaning, pool, rng);
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    if (i >= qs.length) {
-      final pct = score / qs.length;
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                pct >= .8
-                    ? '🏆'
-                    : pct >= .5
-                    ? '💪'
-                    : '📚',
-                style: tt.displayLarge,
-              ),
-              const SizedBox(height: 16),
-              Text('$score / ${qs.length}', style: tt.displaySmall?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Text(
-                pct >= .8
-                    ? '誠讚！Excellent !'
-                    : pct >= .5
-                    ? 'Pas mal, continuez !'
-                    : 'On révise et on recommence !',
-                style: tt.titleMedium,
-              ),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: () => setState(restart),
-                icon: const Icon(Icons.replay),
-                label: const Text('Rejouer'),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () => widget.go(4),
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Analyser mes erreurs avec Claude'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
+    if (i >= qs.length) return _results(context);
     final q = qs[i];
-    final prompt = switch (q.kind) {
-      _Kind.meaning => Column(
-        children: [
-          Text('Que signifie (${langs[q.word.lang]})…', style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant)),
-          const SizedBox(height: 8),
-          FittedBox(
-            child: Text(q.word.hanzi, style: zh(64, weight: FontWeight.w600)),
-          ),
-        ],
+    return Scaffold(
+      appBar: SessionBar(
+        progress: i / qs.length,
+        trailing: Center(child: Text('${i + 1}/${qs.length}', style: Theme.of(context).textTheme.labelLarge)),
       ),
-      _Kind.write => Column(
-        children: [
-          Text(
-            'Comment dit-on en ${langNames[q.word.lang]!.toLowerCase()}…',
-            style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 8),
-          Text('« ${q.word.fr} »', textAlign: TextAlign.center, style: tt.headlineSmall),
-        ],
-      ),
-      _Kind.listen => Column(
-        children: [
-          Text(
-            'Écoutez (${langs[q.word.lang]}) et choisissez',
-            style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 12),
-          IconButton.filled(
-            iconSize: 48,
-            padding: const EdgeInsets.all(20),
-            onPressed: () => play(q.word),
-            icon: const Icon(Icons.volume_up_rounded),
-          ),
-        ],
-      ),
-    };
-
-    return Column(
-      children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: LinearProgressIndicator(
-                      value: i / qs.length,
-                      minHeight: 8,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text('${i + 1}/${qs.length}', style: tt.labelLarge),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20), child: prompt),
-              ),
-              const SizedBox(height: 20),
-              for (final o in q.options) ...[
-                _Option(
-                  word: o,
-                  showFr: q.kind == _Kind.meaning,
-                  state: picked == null
-                      ? null
-                      : o == q.word
-                      ? true
-                      : o == picked
-                      ? false
-                      : null,
-                  revealed: picked != null,
-                  onTap: () => answer(o),
-                ),
-                const SizedBox(height: 10),
-              ],
-            ],
-          ),
+      body: KeyedSubtree(
+        key: ValueKey(i),
+        child: ExerciseView(
+          exercise: q,
+          onAnswer: (ok) {
+            if (ok) {
+              score++;
+            } else {
+              missed.add(q.word);
+            }
+            store.quizAnswer(q.word, ok);
+          },
+          onDone: (_) => setState(() => i++),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-          child: AnimatedOpacity(
-            opacity: picked == null ? 0 : 1,
-            duration: const Duration(milliseconds: 200),
-            child: FilledButton(
-              onPressed: picked == null ? null : next,
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-              child: Text(i + 1 == qs.length ? 'Voir le score' : 'Suivant'),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
-}
 
-class _Option extends StatelessWidget {
-  const _Option({
-    required this.word,
-    required this.showFr,
-    required this.state,
-    required this.revealed,
-    required this.onTap,
-  });
-  final Word word;
-  final bool showFr, revealed;
-  final bool? state; // true = correct answer, false = wrong pick
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _results(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final color = state == null
-        ? null
-        : state!
-        ? Colors.green
-        : cs.error;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      decoration: BoxDecoration(
-        color: color?.withValues(alpha: 0.15) ?? cs.surfaceContainerLow,
-        border: Border.all(color: color ?? cs.outlineVariant, width: color == null ? 1 : 2),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      showFr
-                          ? Text(word.fr, style: tt.titleMedium)
-                          : Text(word.hanzi, style: zh(26, weight: FontWeight.w500)),
-                      if (revealed)
-                        Text(
-                          showFr ? '${word.hanzi} · ${word.roman}' : '${word.roman} · ${word.fr}',
-                          style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                        ),
-                    ],
-                  ),
-                ),
-                if (color != null) Icon(state! ? Icons.check_circle : Icons.cancel, color: color),
-              ],
+    final pct = qs.isEmpty ? 0 : score / qs.length;
+    final palette = context.palette;
+    return Scaffold(
+      appBar: AppBar(),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        children: [
+          Center(
+            child: ProgressRing(
+              value: pct.toDouble(),
+              size: 120,
+              stroke: 10,
+              child: Text('$score/${qs.length}', style: tt.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
             ),
           ),
-        ),
+          const SizedBox(height: 20),
+          Text(
+            pct >= .8
+                ? 'Excellent ! 太棒了！'
+                : pct >= .5
+                ? 'Pas mal, continuez !'
+                : 'On révise et on recommence !',
+            textAlign: TextAlign.center,
+            style: tt.headlineSmall,
+          ),
+          if (missed.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text('À revoir', style: tt.titleMedium),
+            const SizedBox(height: 8),
+            Card(
+              child: Column(
+                children: [
+                  for (final w in missed)
+                    ListTile(
+                      onTap: () => play(w),
+                      leading: Text(w.hanzi, style: script(24, weight: FontWeight.w600)),
+                      title: Text(w.fr, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(pronLine(w), style: script(13, color: cs.onSurfaceVariant)),
+                      trailing: Icon(Icons.volume_up_outlined, color: palette.warning.color),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            onPressed: () => setState(restart),
+            icon: const Icon(Icons.replay),
+            label: const Text('Rejouer'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Terminer'),
+          ),
+        ],
       ),
     );
   }

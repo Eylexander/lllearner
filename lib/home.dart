@@ -1,220 +1,259 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
+import 'lesson.dart';
+import 'review.dart';
 import 'store.dart';
+import 'widgets.dart';
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.go});
-  final ValueChanged<int> go;
+/// The "Apprendre" tab: today's goal, the next lesson, and the whole course path.
+class LearnTab extends StatelessWidget {
+  const LearnTab({super.key});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final hour = DateTime.now().hour;
-    final (greet, greetFr) = hour < 12
-        ? ('早安', 'Tsá-an · Bonjour')
-        : hour < 18
-        ? ('午安', 'Ngóo-an · Bon après-midi')
-        : ('暗安', 'Àm-an · Bonsoir');
-    final words = store.words;
-    final todo = store.due.length + min(store.newLeftToday, words.where((w) => w.isNew).length);
-    final mastered = words.where((w) => w.mastered).length;
-    final learning = words.where((w) => !w.isNew).length - mastered;
-    // Word of the day: among studied words and today's new ones, not the whole deck.
-    final pool = [...words.where((w) => !w.isNew), ...store.sessionQueue().where((w) => w.isNew)];
-    final daily = (pool.isEmpty ? words : pool)[DateTime.now().difference(DateTime(2024)).inDays % max(1, pool.length)];
-    final tags = <String, List<Word>>{};
-    for (final w in words) {
-      (tags[store.active.length > 1 ? '${langs[w.lang]} · ${w.tag}' : w.tag] ??= []).add(w);
+    final (hanzi, roman, fr) =
+        store.course.greetings[hour < 12
+            ? 0
+            : hour < 18
+            ? 1
+            : 2];
+    final next = store.nextLesson;
+    // Sections in course order, with their units.
+    final sections = <String, List<Unit>>{};
+    for (final u in store.units) {
+      (sections[u.section] ??= []).add(u);
     }
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    greet,
-                    style: zh(36, weight: FontWeight.w700, color: cs.primary),
-                  ),
-                  Text(greetFr, style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant)),
-                ],
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                hanzi,
+                style: script(30, weight: FontWeight.w700, color: cs.primary),
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(color: cs.tertiaryContainer, borderRadius: BorderRadius.circular(99)),
-              child: Text('🔥 ${store.streak} j', style: tt.titleMedium?.copyWith(color: cs.onTertiaryContainer)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Card(
-          color: cs.primary,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => go(1),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$todo',
-                          style: tt.displayMedium?.copyWith(color: cs.onPrimary, fontWeight: FontWeight.w700),
-                        ),
-                        Text(
-                          todo == 0 ? 'Rien à réviser, bravo !' : 'cartes à réviser aujourd’hui',
-                          style: tt.titleMedium?.copyWith(color: cs.onPrimary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: cs.onPrimary,
-                    child: Icon(todo == 0 ? Icons.quiz : Icons.play_arrow_rounded, color: cs.primary, size: 32),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('$roman · $fr', style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant)),
               ),
-            ),
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _Stat('Nouveaux', words.where((w) => w.isNew).length, cs.secondary),
-            const SizedBox(width: 12),
-            _Stat('En cours', learning, Colors.orange),
-            const SizedBox(width: 12),
-            _Stat('Maîtrisés', mastered, Colors.green),
-          ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(child: Text('Nouveaux mots / jour', style: tt.titleSmall)),
-            SegmentedButton<int>(
-              showSelectedIcon: false,
-              segments: [
-                for (final n in const [5, 10, 20, 30]) ButtonSegment(value: n, label: Text('$n')),
-              ],
-              selected: {store.newPerDay},
-              onSelectionChanged: (s) => store.setNewPerDay(s.first),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Text('Langues étudiées', style: tt.titleSmall),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: SegmentedButton<String>(
-                multiSelectionEnabled: true,
-                segments: [
-                  for (final MapEntry(key: code, value: name) in langs.entries)
-                    ButtonSegment(
-                      value: code,
-                      label: Text('$name ${langNames[code]}', style: zh(13)),
-                    ),
-                ],
-                selected: store.active,
-                onSelectionChanged: store.setActive, // ignores an empty selection
-              ),
-            ),
-          ],
-        ),
+        _TodayCard(next),
         const SizedBox(height: 28),
-        Text('Mot du jour', style: tt.titleLarge),
-        const SizedBox(height: 12),
-        Card(
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => play(daily),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Text(daily.hanzi, style: zh(44, weight: FontWeight.w600)),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${langs[daily.lang]} · ${daily.roman}', style: zh(16, color: cs.primary)),
-                        Text(daily.meaning, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-                      ],
-                    ),
-                  ),
-                  if (daily.hasAudio) Icon(Icons.volume_up_rounded, color: cs.primary),
-                ],
-              ),
-            ),
-          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text('Votre parcours', style: tt.titleLarge),
         ),
-        const SizedBox(height: 28),
-        Text('Par thème', style: tt.titleLarge),
         const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                for (final MapEntry(key: tag, value: list) in tags.entries) ...[
-                  Row(
-                    children: [
-                      Expanded(child: Text(tag, style: tt.titleSmall)),
-                      Text('${list.where((w) => !w.isNew).length}/${list.length}', style: tt.labelMedium),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(
-                    value: list.where((w) => !w.isNew).length / list.length,
-                    minHeight: 8,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  const SizedBox(height: 14),
-                ],
-              ],
-            ),
-          ),
-        ),
+        for (final MapEntry(key: name, value: units) in sections.entries) ...[
+          _Section(name, units, current: next),
+          const SizedBox(height: 12),
+        ],
       ],
     );
   }
 }
 
-class _Stat extends StatelessWidget {
-  const _Stat(this.label, this.value, this.color);
-  final String label;
-  final int value;
-  final Color color;
+class _TodayCard extends StatelessWidget {
+  const _TodayCard(this.next);
+  final Lesson? next;
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    return Expanded(
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-          child: Column(
-            children: [
-              Text(
-                '$value',
-                style: tt.headlineSmall?.copyWith(color: color, fontWeight: FontWeight.w700),
+    final done = store.learnedToday, goal = store.dailyGoal;
+    final due = store.due.length;
+    return Card(
+      color: cs.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                ProgressRing(
+                  value: done / goal,
+                  size: 64,
+                  child: done >= goal
+                      ? Icon(Icons.check_rounded, color: cs.primary, size: 32)
+                      : Text('$done/$goal', style: tt.titleSmall?.copyWith(color: cs.onPrimaryContainer)),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        done >= goal ? 'Objectif du jour atteint !' : 'Objectif du jour',
+                        style: tt.titleMedium?.copyWith(color: cs.onPrimaryContainer, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        done >= goal
+                            ? '$done nouveaux mots aujourd’hui'
+                            : '${goal - done} nouveau${goal - done > 1 ? 'x' : ''} mot${goal - done > 1 ? 's' : ''} '
+                                  'à apprendre',
+                        style: tt.bodyMedium?.copyWith(color: cs.onPrimaryContainer),
+                      ),
+                      if (due > 0)
+                        Text(
+                          '$due révision${due > 1 ? 's' : ''} en attente',
+                          style: tt.bodyMedium?.copyWith(color: cs.onPrimaryContainer),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (next != null)
+              FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                onPressed: () => LessonPage.open(context, next!),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: Text(
+                  store.learned.isEmpty
+                      ? 'Commencer · ${next!.unit.name}'
+                      : 'Continuer · ${next!.unit.name}, leçon ${next!.number}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )
+            else
+              Text('Vous avez appris tout le cours. 太厲害了！', style: tt.titleMedium, textAlign: TextAlign.center),
+            if (due > 0) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor: cs.onPrimaryContainer,
+                  side: BorderSide(color: cs.onPrimaryContainer.withValues(alpha: 0.4)),
+                ),
+                onPressed: () => ReviewSession.open(context),
+                icon: const Icon(Icons.style_outlined),
+                label: Text('Réviser $due carte${due > 1 ? 's' : ''}'),
               ),
-              Text(label, style: tt.labelMedium),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A part of the course ('Les essentiels', 'Niveau 1 · Débutant'), open when it holds the
+/// next lesson.
+class _Section extends StatelessWidget {
+  const _Section(this.name, this.units, {required this.current});
+  final String name;
+  final List<Unit> units;
+  final Lesson? current;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final size = units.fold(0, (n, u) => n + u.size);
+    final learned = units.fold(0, (n, u) => n + u.learned);
+    final here = units.contains(current?.unit);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        key: PageStorageKey(name),
+        initiallyExpanded: here,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        leading: ProgressRing(
+          value: size == 0 ? 0 : learned / size,
+          size: 40,
+          stroke: 4,
+          child: learned == size ? Icon(Icons.check, size: 20, color: cs.primary) : null,
+        ),
+        title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text('$learned / $size mots'),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [for (final u in units) _UnitView(u, current: current)],
+      ),
+    );
+  }
+}
+
+class _UnitView extends StatelessWidget {
+  const _UnitView(this.unit, {required this.current});
+  final Unit unit;
+  final Lesson? current;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(unit.name, style: tt.titleSmall)),
+              Text('${unit.learned}/${unit.size}', style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [for (final l in unit.lessons) _LessonButton(l, current: l == current)],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LessonButton extends StatelessWidget {
+  const _LessonButton(this.lesson, {required this.current});
+  final Lesson lesson;
+  final bool current;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final done = lesson.done;
+    final (bg, fg) = done
+        ? (cs.primary, cs.onPrimary)
+        : current || lesson.learned > 0
+        ? (cs.primaryContainer, cs.onPrimaryContainer)
+        : (cs.surfaceContainerHighest, cs.onSurfaceVariant);
+    final preview = lesson.words.take(3).map((w) => w.hanzi).join(' ');
+    return Tooltip(
+      message: '${done ? 'Revoir' : 'Leçon ${lesson.number}'} · $preview',
+      child: Material(
+        color: bg,
+        shape: CircleBorder(side: current ? BorderSide(color: cs.primary, width: 3) : BorderSide.none),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => LessonPage.open(context, lesson),
+          child: SizedBox.square(
+            dimension: current ? 52 : 44,
+            child: Center(
+              child: done
+                  ? Icon(Icons.check_rounded, color: fg)
+                  : current
+                  ? Icon(Icons.play_arrow_rounded, color: fg, size: 30)
+                  : Text(
+                      '${lesson.number}',
+                      style: TextStyle(color: fg, fontWeight: FontWeight.w600),
+                    ),
+            ),
           ),
         ),
       ),

@@ -1,6 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- MOE dictionary recordings, downloaded on first play -->
-    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="LLLearner"
         android:name="${applicationName}"
@@ -49,7 +47,7 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- Required by flutter_tts (Mandarin voice) on Android 11+ -->
+        <!-- Required by flutter_tts (the course language's voice) on Android 11+ -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>

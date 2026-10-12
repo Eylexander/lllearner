@@ -1,65 +1,101 @@
 import 'package:flutter/material.dart';
 
 import 'store.dart';
+import 'theme.dart';
+import 'widgets.dart';
 
-/// Bottom sheet with everything known about a word: romanization, meaning, the other
-/// language's equivalent, and (hok) the MOE dictionary's definitions and example sentences.
-void showWordSheet(BuildContext context, Word w) => showModalBottomSheet(
-  context: context,
-  isScrollControlled: true,
-  showDragHandle: true,
-  builder: (context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    final defs = store.definitions(w);
-    final examples = store.examples(w);
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-        children: [
-          Row(
+/// Bottom sheet with everything about a word: pronunciation, meaning, where it stands
+/// in the learner's reviews, and example sentences.
+void showWordSheet(BuildContext context, Word w) {
+  play(w);
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) => ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final cs = Theme.of(context).colorScheme;
+        final tt = Theme.of(context).textTheme;
+        final palette = context.palette;
+        final examples = store.examples(w);
+        final (icon, status, color) = w.isNew
+            ? (Icons.fiber_new_outlined, 'Pas encore appris', cs.onSurfaceVariant)
+            : w.mastered
+            ? (Icons.verified, 'Maîtrisé', palette.success.color)
+            : (
+                Icons.timelapse,
+                w.due!.isAfter(DateTime.now()) ? 'En cours · prochaine révision le ${_date(w.due!)}' : 'À réviser',
+                palette.warning.color,
+              );
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
             children: [
-              Flexible(
-                child: Text(w.hanzi, style: zh(44, weight: FontWeight.w600)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Hanzi(w.hanzi, w.roman, size: 48, weight: FontWeight.w600),
+                        Pronunciation(w, size: 22, align: TextAlign.start),
+                      ],
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    tooltip: 'Écouter',
+                    onPressed: () => play(w),
+                    icon: const Icon(Icons.volume_up_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Écouter lentement',
+                    onPressed: () => play(w, slow: true),
+                    icon: const Icon(Icons.slow_motion_video),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Chip(
-                label: Text(langs[w.lang]!, style: zh(13)),
-                visualDensity: VisualDensity.compact,
+              const SizedBox(height: 12),
+              Text(w.fr, style: tt.titleLarge),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text(w.tag), visualDensity: VisualDensity.compact),
+                  Chip(
+                    avatar: Icon(icon, size: 18, color: color),
+                    label: Text(status),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ),
-              const Spacer(),
-              if (w.hasAudio)
-                IconButton.filledTonal(onPressed: () => play(w), icon: const Icon(Icons.volume_up_rounded)),
+              if (w.isNew) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => store.markKnown(w),
+                    icon: const Icon(Icons.done_all),
+                    label: const Text('Je le connais déjà'),
+                  ),
+                ),
+              ],
+              if (examples.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('Exemples', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
+                const SizedBox(height: 4),
+                for (final e in examples) ExampleTile(e, highlight: w.hanzi),
+              ],
             ],
           ),
-          Text(w.roman, style: tt.titleLarge?.copyWith(color: cs.primary)),
-          if (w.zhuyin.isNotEmpty) Text(w.zhuyin, style: zh(16, color: cs.onSurfaceVariant)),
-          const SizedBox(height: 12),
-          if (w.fr.isNotEmpty) Text(w.fr, style: tt.titleMedium),
-          if (w.see.isNotEmpty)
-            Text('En ${langNames[w.lang == 'hok' ? 'man' : 'hok']!.toLowerCase()} : ${w.see}', style: zh(15)),
-          if (defs.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Text('Définition (華語, dictionnaire du ministère)', style: tt.labelLarge?.copyWith(color: cs.outline)),
-            const SizedBox(height: 4),
-            Text(defs, style: zh(15)),
-          ],
-          if (examples.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Text('Exemples', style: tt.labelLarge?.copyWith(color: cs.outline)),
-            for (final (i, e) in examples.indexed)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(e.hanji, style: zh(17)),
-                subtitle: Text('${e.roman}\n華語：${e.zh}', style: zh(13, color: cs.onSurfaceVariant)),
-                isThreeLine: true,
-                trailing: IconButton(onPressed: () => playExample(w, i), icon: const Icon(Icons.volume_up_outlined)),
-              ),
-          ],
-        ],
-      ),
-    );
-  },
-);
+        );
+      },
+    ),
+  );
+}
+
+String _date(DateTime d) =>
+    '${d.day} ${const ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'][d.month - 1]}';

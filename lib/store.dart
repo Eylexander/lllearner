@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -11,76 +10,55 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqlite3/sqlite3.dart' hide Row;
 import 'package:sqlite3/sqlite3.dart' as sql show Row;
 
-/// Languages spoken in Taipei, each a deck of assets/dict.db with its own progress.
-const langs = {'hok': '台語', 'man': '華語'};
-const langNames = {'hok': 'Taïwanais', 'man': 'Mandarin'};
+import 'course.dart';
 
-/// A word of one deck: Han characters, romanization (Tâi-lô for hok, pinyin for man),
-/// French gloss, and [see], its equivalent in the other language ("謝謝 xièxie").
+/// A word of a course's deck: characters, romanization (pinyin), French gloss, and its
+/// theme or level tag ('Salutations', '3 · Élémentaire', or Claude's tag for imports).
 class Word {
-  Word(
-    this.lang,
-    this.hanzi,
-    this.roman,
-    this.fr,
-    this.tag, {
-    this.zhuyin = '',
-    this.audio = '',
-    this.see = '',
-    this.moe = 0,
-    this.short = '',
-  });
+  Word(this.lang, this.hanzi, this.roman, this.fr, this.tag, {this.zhuyin = '', this.imported = false});
 
   final String lang, hanzi, roman, zhuyin, fr, tag;
-  final String audio; // hok: MOE recording path ('subak/5/5790'), '' if none
-  final String see;
-  final int moe; // MOE dictionary entry id (definitions, examples), 0 if none
-  final String short; // first Mandarin definition, stands in when fr is ''
+  final bool imported; // added from a Claude reply
   double ease = 2.5;
   double interval = 0; // days
   int reps = 0, lapses = 0;
-  DateTime? due; // null = never studied
-  late final String searchKey = plain('$roman $zhuyin $fr $short $tag ${langNames[lang]}');
+  DateTime? due; // null = not learned yet
+  late final String searchKey = plain('$roman $zhuyin $fr $tag');
 
   String get key => '$lang:$hanzi';
-  String get meaning => fr.isNotEmpty ? fr : '華語：$short';
   bool get isNew => due == null;
   bool get mastered => interval >= 21;
-  bool get hasAudio => lang == 'man' || audio.isNotEmpty; // man: TTS
+  bool get weak => !isNew && (lapses > 0 || ease < 2.3);
 
-  factory Word.fromRow(sql.Row r) => Word(
-    r['lang'],
-    r['hanzi'],
-    r['roman'],
-    r['fr'],
-    r['tag'],
-    zhuyin: r['zhuyin'] ?? '',
-    audio: r['audio'] ?? '',
-    see: r['see'] ?? '',
-    moe: r['moe'] ?? 0,
-    short: r['short'] ?? '',
-  );
+  /// '3 · Élémentaire' → 3; themed essentials and imports → 0.
+  int get level => int.tryParse(tag.split(' ').first) ?? 0;
+
+  factory Word.fromRow(sql.Row r, {bool imported = false}) =>
+      Word(r['lang'], r['hanzi'], r['roman'], r['fr'], r['tag'], zhuyin: r['zhuyin'] ?? '', imported: imported);
 }
 
 enum Grade { again, hard, good, easy }
 
-/// Next interval in days (simplified SM-2).
-double nextInterval(Word w, Grade g) {
+/// Next interval in days (simplified SM-2). A card reviewed ahead of time grows from the time
+/// actually elapsed since its last review, never below its current interval when it's known.
+double nextInterval(Word w, Grade g, DateTime now) {
+  final early = w.due != null && w.due!.isAfter(now);
+  final elapsed = early ? max(0.0, w.interval - w.due!.difference(now).inMinutes / 1440) : w.interval;
   final good = w.reps == 0
       ? 1.0
       : w.reps == 1
       ? 3.0
-      : w.interval * w.ease;
+      : max(w.interval, elapsed * w.ease);
   return switch (g) {
     Grade.again => 0.0,
-    Grade.hard => w.reps == 0 ? 0.25 : max(1.0, w.interval * 1.2),
+    Grade.hard => w.reps == 0 ? 0.25 : max(1.0, elapsed * 1.2),
     Grade.good => good,
     Grade.easy => max(4.0, good * 1.3),
   };
 }
 
 void applyGrade(Word w, Grade g, DateTime now) {
-  final next = nextInterval(w, g);
+  final next = nextInterval(w, g, now);
   if (g == Grade.again) {
     w.reps = 0;
     w.lapses++;
@@ -105,25 +83,68 @@ String formatInterval(double d) => d == 0
     ? '${(d / 30).round()} mois'
     : '${(d / 365).toStringAsFixed(1)} an';
 
-typedef Example = ({String hanji, String roman, String zh});
+typedef Example = ({String hanzi, String roman, String fr});
+
+/// A few new words taught together: introduced one by one, then practised.
+class Lesson {
+  Lesson(this.unit, this.number, this.words);
+  final Unit unit;
+  final int number; // within its unit, from 1
+  final List<Word> words;
+
+  bool get done => words.every((w) => !w.isNew);
+  int get learned => words.where((w) => !w.isNew).length;
+}
+
+/// A run of lessons on one theme, or one part of a level ('Débutant · 2/6').
+class Unit {
+  Unit(this.section, this.title, {this.part = 1, this.parts = 1});
+  final String section; // heading the unit is listed under
+  final String title;
+  final int part, parts;
+  final List<Lesson> lessons = [];
+
+  String get name => parts > 1 ? '$title · $part/$parts' : title;
+  Iterable<Word> get words => lessons.expand((l) => l.words);
+  int get size => lessons.fold(0, (n, l) => n + l.words.length);
+  int get learned => lessons.fold(0, (n, l) => n + l.learned);
+}
+
+enum Pron { pinyin, zhuyin, both }
 
 /// Two SQLite databases in the app support dir:
-/// - dict.db: read-only copy of assets/dict.db (words, definitions, examples), recopied
-///   when assets/dict.version changes;
-/// - user.db: progress(key, …) one row per studied word, imported (words from Claude),
-///   meta('state' → JSON: active languages, mistakes, streak and daily counters).
-/// Decks of active languages are held in memory; definitions and examples are queried
-/// on demand.
+/// - dict.db: read-only copy of assets/dict.db (words of every course, example sentences),
+///   recopied when assets/dict.version changes;
+/// - user.db: progress(key, …) one row per learned word, imported (words from Claude),
+///   meta('state' → JSON: course, settings, mistakes, streak and daily counters).
+/// The current course's deck is held in memory; example sentences are queried on demand.
 class Store extends ChangeNotifier {
+  static const lessonSize = 6, lessonsPerUnit = 8;
+
   late final Database dict, _db;
-  int newPerDay = 10;
-  Set<String> active = {'hok'};
+  Course course = courses.first;
   final Map<String, List<Word>> _decks = {};
   final Map<String, Word> _byKey = {};
-  List<Word> words = []; // active decks, in study order
+  List<Word> words = []; // current course, in study order (imports first)
+  List<Unit> units = [];
   List<String> mistakes = []; // keys, most recent first
   int _streak = 0, _newToday = 0;
   String _lastDay = '';
+  List<String> days = []; // days with activity, most recent last (for the streak calendar)
+
+  // Settings.
+  bool onboarded = false;
+  int dailyGoal = 10; // new words a day
+  Pron pron = Pron.pinyin;
+  bool toneColors = true;
+  bool hints = true; // pronunciation shown in exercises
+  double speechRate = 0.42;
+  ThemeMode themeMode = ThemeMode.system;
+  bool dynamicColor = true;
+  int seed = 0;
+
+  /// Bumped when an appearance setting changes, so only then the app's theme is rebuilt.
+  final appearance = ValueNotifier(0);
 
   /// [dir] is for tests (a temp dir); the app uses its support directory.
   Future<void> load({String? dir}) async {
@@ -145,16 +166,37 @@ class Store extends ChangeNotifier {
     if (state == null) {
       await _migrate();
     } else {
-      final j = jsonDecode(state['v']) as Map;
-      active = Set<String>.from(j['active']);
-      mistakes = List<String>.from(j['mistakes']);
-      _streak = j['streak'];
-      _lastDay = j['lastDay'];
-      _newToday = j['newToday'];
-      newPerDay = j['newPerDay'];
+      _read(jsonDecode(state['v']) as Map, onboarded: true);
     }
-    active.forEach(_loadDeck);
+    _loadDeck(course.id);
     _refresh();
+  }
+
+  /// Closes both databases (tests: so their directory can be deleted on Windows).
+  void close() {
+    dict.close();
+    _db.close();
+  }
+
+  /// The state JSON. Older versions had no 'course' but 'active' languages (Taiwanese
+  /// Hokkien was dropped: its progress rows stay in user.db, unused).
+  void _read(Map j, {required bool onboarded}) {
+    final active = (j['active'] as List?)?.cast<String>() ?? const [];
+    course = courseById(j['course'] ?? active.firstWhere((l) => courses.any((c) => c.id == l), orElse: () => ''));
+    this.onboarded = j['onboarded'] ?? onboarded;
+    mistakes = List<String>.from(j['mistakes'] ?? []);
+    _streak = j['streak'] ?? 0;
+    _lastDay = j['lastDay'] ?? '';
+    _newToday = j['newToday'] ?? 0;
+    days = List<String>.from(j['days'] ?? [if (_lastDay.isNotEmpty) _lastDay]);
+    dailyGoal = j['newPerDay'] ?? 10;
+    pron = Pron.values.asNameMap()[j['pron']] ?? Pron.pinyin;
+    toneColors = j['toneColors'] ?? true;
+    hints = j['hints'] ?? true;
+    speechRate = (j['speechRate'] as num?)?.toDouble() ?? 0.42;
+    themeMode = ThemeMode.values.asNameMap()[j['themeMode']] ?? ThemeMode.system;
+    dynamicColor = j['dynamicColor'] ?? true;
+    seed = j['seed'] ?? 0;
   }
 
   static Future<Database> _openDict(String dir) async {
@@ -181,49 +223,28 @@ class Store extends ChangeNotifier {
     }
   }
 
-  /// One-time import of the SharedPreferences formats: 'db' (two languages) or the
-  /// Hokkien-only 'state_tw'.
+  /// One-time import of the SharedPreferences format 'db', from before user.db.
   Future<void> _migrate() async {
     final prefs = await SharedPreferences.getInstance();
-    var j = prefs.getString('db') == null ? null : jsonDecode(prefs.getString('db')!) as Map;
-    final old = prefs.getString('state_tw');
-    if (j == null && old != null) {
-      final o = jsonDecode(old) as Map;
-      j = {
-        ...o,
-        'active': ['hok'],
-        'mistakes': [for (final h in o['mistakes'] ?? []) 'hok:$h'],
-        'progress': {
-          for (final w in o['words'])
-            if (w['due'] != null) 'hok:${w['hanzi']}': [w['ease'], w['interval'], w['reps'], w['lapses'], w['due']],
-        },
-        'imported': [
-          for (final w in o['words'])
-            {'lang': 'hok', 'hanzi': w['hanzi'], 'roman': w['tailo'], 'fr': w['fr'], 'tag': w['tag']},
-        ],
-      };
-    }
+    final raw = prefs.getString('db');
+    final j = raw == null ? null : jsonDecode(raw) as Map;
+    _read(j ?? const {}, onboarded: j != null);
     if (j != null) {
-      active = Set<String>.from(j['active'] ?? ['hok']);
-      mistakes = List<String>.from(j['mistakes'] ?? []);
-      _streak = j['streak'] ?? 0;
-      _lastDay = j['lastDay'] ?? '';
-      _newToday = j['newToday'] ?? 0;
-      newPerDay = j['newPerDay'] ?? 10;
       _db.execute('BEGIN');
       (j['progress'] as Map? ?? {}).forEach(
         (k, p) => _db.execute('INSERT OR REPLACE INTO progress VALUES (?,?,?,?,?,?)', [k, ...p]),
       );
       final imported = (j['imported'] as List? ?? []).cast<Map>();
       for (final (i, w) in imported.indexed) {
-        if (!_isBundled(w['lang'] ?? 'hok', w['hanzi'])) {
+        final lang = w['lang'] ?? 'hok';
+        if (!_isBundled(lang, w['hanzi'])) {
           _db.execute('INSERT OR IGNORE INTO imported VALUES (?,?,?,?,?,?,?)', [
-            w['lang'] ?? 'hok',
+            lang,
             w['hanzi'],
             w['roman'] ?? '',
             w['zhuyin'] ?? '',
             w['fr'],
-            w['tag'] ?? 'Claude',
+            w['tag'] ?? 'Assistant IA',
             -i,
           ]);
         }
@@ -249,11 +270,10 @@ class Store extends ChangeNotifier {
     final seen = <String>{};
     for (final w in [
       for (final r in _db.select(
-        "SELECT lang, hanzi, roman, zhuyin, fr, tag, '' AS audio, '' AS see, 0 AS moe, '' AS short "
-        'FROM imported WHERE lang = ? ORDER BY added DESC',
+        'SELECT lang, hanzi, roman, zhuyin, fr, tag FROM imported WHERE lang = ? ORDER BY added DESC',
         [lang],
       ))
-        Word.fromRow(r), // imports first: studied next
+        Word.fromRow(r, imported: true), // imports first: learned next
       for (final r in dict.select('SELECT * FROM words WHERE lang = ? ORDER BY pos', [lang])) Word.fromRow(r),
     ]) {
       if (!seen.add(w.hanzi)) continue;
@@ -272,42 +292,66 @@ class Store extends ChangeNotifier {
     _decks[lang] = deck;
   }
 
-  /// Active decks mixed level by level ('3 · Élémentaire' → 3; essentials and imports
-  /// → 0), alternating languages within a level, so both progress side by side.
+  /// Splits the deck into units and lessons: each tag (theme, level, or Claude's tag for
+  /// imports) is cut into lessons of [lessonSize] words, and long ones into units of
+  /// [lessonsPerUnit] lessons.
   void _refresh() {
-    final decks = [
-      for (final l in langs.keys)
-        if (active.contains(l)) _decks[l]!,
-    ];
-    final byLevel = [
-      for (final d in decks) [for (var lv = 0; lv <= 7; lv++) d.where((w) => _level(w) == lv).toList()],
-    ];
-    words = [
-      for (var lv = 0; lv <= 7; lv++)
-        for (var i = 0; i < byLevel.map((d) => d[lv].length).fold(0, max); i++)
-          for (final d in byLevel)
-            if (i < d[lv].length) d[lv][i],
-    ];
+    words = _decks[course.id]!;
+    final groups = <String, List<Word>>{};
+    for (final w in words) {
+      (groups['${w.imported ? 'import' : 'deck'}:${w.tag}'] ??= []).add(w);
+    }
+    units = [];
+    for (final group in groups.values) {
+      final w = group.first;
+      final lessons = [
+        for (var i = 0; i < group.length; i += lessonSize) group.sublist(i, min(i + lessonSize, group.length)),
+      ];
+      if (lessons.length > 1 && lessons.last.length < lessonSize ~/ 2) {
+        lessons[lessons.length - 2].addAll(lessons.removeLast());
+      }
+      final (section, title) = w.imported
+          ? ('Vos mots de l’assistant IA', w.tag)
+          : w.level == 0
+          ? ('Les essentiels', w.tag)
+          : ('Niveau ${w.tag}', w.tag.substring(w.tag.indexOf(' · ') + 3));
+      final parts = (lessons.length / lessonsPerUnit).ceil();
+      for (var p = 0; p < parts; p++) {
+        final unit = Unit(section, title, part: p + 1, parts: parts);
+        final chunk = lessons.skip(p * lessonsPerUnit).take(lessonsPerUnit);
+        unit.lessons.addAll([for (final (i, l) in chunk.indexed) Lesson(unit, i + 1, l)]);
+        units.add(unit);
+      }
+    }
     notifyListeners();
   }
 
-  static int _level(Word w) => int.tryParse(w.tag.split(' ').first)?.clamp(0, 7) ?? 0;
+  /// The first lesson with words left to learn.
+  Lesson? get nextLesson {
+    for (final u in units) {
+      for (final l in u.lessons) {
+        if (!l.done) return l;
+      }
+    }
+    return null;
+  }
 
-  void setActive(Set<String> langs) {
-    if (langs.isEmpty) return;
-    langs.forEach(_loadDeck);
-    active = langs;
+  void setCourse(Course c) {
+    _loadDeck(c.id);
+    course = c;
     _saveMeta();
     _refresh();
   }
 
-  void setNewPerDay(int n) {
-    newPerDay = n;
+  /// Settings: [update] changes fields, then they're saved and the UI rebuilt.
+  void set(VoidCallback update, {bool appearance = false}) {
+    update();
     _saveMeta();
+    if (appearance) this.appearance.value++;
     notifyListeners();
   }
 
-  /// Adds words not already known, first in their deck so they're the next new cards.
+  /// Adds words not already known, first in their deck so they're the next ones taught.
   int addWords(Iterable<Word> list) {
     var n = 0;
     for (final w in list) {
@@ -322,8 +366,9 @@ class Store extends ChangeNotifier {
         DateTime.now().microsecondsSinceEpoch,
       ]);
       if (_db.updatedRows == 0) continue;
-      _decks[w.lang]?.insert(0, w);
-      _byKey[w.key] = w;
+      final word = Word(w.lang, w.hanzi, w.roman, w.fr, w.tag, zhuyin: w.zhuyin, imported: true);
+      _decks[w.lang]?.insert(0, word);
+      _byKey[w.key] = word;
       n++;
     }
     _refresh();
@@ -335,29 +380,59 @@ class Store extends ChangeNotifier {
 
   int get streak =>
       _lastDay == _today || _lastDay == _day(DateTime.now().subtract(const Duration(days: 1))) ? _streak : 0;
-  int get newLeftToday => _lastDay == _today ? max(0, newPerDay - _newToday) : newPerDay;
+  bool get activeToday => _lastDay == _today;
+  int get learnedToday => activeToday ? _newToday : 0;
+
+  Iterable<Word> get learned => words.where((w) => !w.isNew);
 
   List<Word> get due {
     final now = DateTime.now();
     return words.where((w) => !w.isNew && !w.due!.isAfter(now)).toList()..sort((a, b) => a.due!.compareTo(b.due!));
   }
 
-  /// Due cards, then today's new cards (in [words] order, so languages alternate).
-  List<Word> sessionQueue() => [...due, ...words.where((w) => w.isNew).take(newLeftToday)];
+  /// Reviewing ahead: the [n] learned words that come up soonest but aren't due yet.
+  List<Word> ahead([int n = 20]) {
+    final now = DateTime.now();
+    return (words.where((w) => !w.isNew && w.due!.isAfter(now)).toList()..sort((a, b) => a.due!.compareTo(b.due!)))
+        .take(n)
+        .toList();
+  }
+
+  /// Reviews coming up on each of the next [n] days (index 0 = later today).
+  List<int> forecast([int n = 7]) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final counts = List.filled(n, 0);
+    for (final w in words) {
+      if (w.isNew || !w.due!.isAfter(now)) continue;
+      final d = DateTime(w.due!.year, w.due!.month, w.due!.day).difference(today).inDays;
+      if (d < n) counts[d]++;
+    }
+    return counts;
+  }
 
   Word? byKey(String key) => _byKey[key];
 
-  /// MOE definitions ("1. (動詞) 吃。\n2. …"), '' for words outside the dictionary.
-  String definitions(Word w) =>
-      w.moe == 0 ? '' : dict.select('SELECT text FROM defs WHERE moe = ?', [w.moe]).firstOrNull?['text'] ?? '';
+  final _examples = <String, List<Example>>{};
 
-  List<Example> examples(Word w) => w.moe == 0
-      ? const []
-      : [
-          for (final r in dict.select('SELECT hanji, roman, zh FROM examples WHERE moe = ? ORDER BY n', [w.moe]))
-            (hanji: r['hanji'] as String, roman: r['roman'] as String, zh: r['zh'] as String),
-        ];
+  /// Example sentences: the dictionary's picks for the word, else any containing it.
+  List<Example> examples(Word w) => _examples[w.key] ??= () {
+    var rows = dict.select(
+      'SELECT s.hanzi, s.roman, s.fr FROM examples e JOIN sentences s ON s.id = e.sid '
+      'WHERE e.lang = ? AND e.hanzi = ? ORDER BY e.n',
+      [w.lang, w.hanzi],
+    );
+    if (rows.isEmpty) {
+      rows = dict.select(
+        'SELECT hanzi, roman, fr FROM sentences WHERE instr(hanzi, ?) > 0 ORDER BY length(hanzi) '
+        'LIMIT 3',
+        [w.hanzi],
+      );
+    }
+    return [for (final r in rows) (hanzi: r['hanzi'] as String, roman: r['roman'] as String, fr: r['fr'] as String)];
+  }();
 
+  /// Review: the learner's own grade.
   void grade(Word w, Grade g) {
     _touchDay();
     if (w.isNew) _newToday++;
@@ -375,9 +450,15 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// End of a lesson: the word goes into reviews, back sooner if it was missed.
+  void learn(Word w, {bool stumbled = false}) => grade(w, stumbled ? Grade.hard : Grade.good);
+
+  /// "I already know it": skipped in lessons, first review in a few days.
+  void markKnown(Word w) => grade(w, Grade.easy);
+
   void quizAnswer(Word w, bool correct) {
     _touchDay();
-    if (!correct) _addMistake(w);
+    correct ? mistakes.remove(w.key) : _addMistake(w);
     _saveMeta();
     notifyListeners();
   }
@@ -387,6 +468,8 @@ class Store extends ChangeNotifier {
     _streak = streak + 1;
     _lastDay = _today;
     _newToday = 0;
+    days = [...days.where((d) => d != _today), _today];
+    if (days.length > 60) days = days.sublist(days.length - 60);
   }
 
   void _addMistake(Word w) {
@@ -398,30 +481,40 @@ class Store extends ChangeNotifier {
 
   void _saveMeta() => _db.execute("INSERT OR REPLACE INTO meta VALUES ('state', ?)", [
     jsonEncode({
-      'active': active.toList(),
+      'course': course.id,
+      'onboarded': onboarded,
       'mistakes': mistakes,
       'streak': _streak,
       'lastDay': _lastDay,
       'newToday': _newToday,
-      'newPerDay': newPerDay,
+      'days': days,
+      'newPerDay': dailyGoal,
+      'pron': pron.name,
+      'toneColors': toneColors,
+      'hints': hints,
+      'speechRate': speechRate,
+      'themeMode': themeMode.name,
+      'dynamicColor': dynamicColor,
+      'seed': seed,
     }),
   ]);
 
   /// Extracts the first JSON array from a pasted Claude reply (code fences and prose
-  /// around it are ignored). Entries without hanzi or fr are skipped; lang defaults to hok.
-  static List<Word> parseDeck(String text) {
+  /// around it are ignored). Entries without hanzi or fr are skipped, and so are entries
+  /// in a language that isn't a course; lang defaults to [lang].
+  static List<Word> parseDeck(String text, {required String lang}) {
     final s = text.indexOf('['), e = text.lastIndexOf(']');
     if (s < 0 || e < s) throw const FormatException('aucun tableau JSON trouvé');
     String str(Object? v) => v is String ? v : '';
     return [
       for (final m in (jsonDecode(text.substring(s, e + 1)) as List).whereType<Map>())
-        if ((m['hanzi'] ?? m['hanji']) is String && m['fr'] is String)
+        if (m['hanzi'] is String && m['fr'] is String && (m['lang'] == null || courses.any((c) => c.id == m['lang'])))
           Word(
-            langs.containsKey(m['lang']) ? m['lang'] : 'hok',
-            m['hanzi'] ?? m['hanji'],
-            str(m['roman'] ?? m['tailo'] ?? m['pinyin']),
+            m['lang'] ?? lang,
+            m['hanzi'],
+            str(m['roman'] ?? m['pinyin']),
             m['fr'],
-            m['tag'] is String ? m['tag'] : 'Claude',
+            m['tag'] is String ? m['tag'] : 'Assistant IA',
             zhuyin: str(m['zhuyin']),
           ),
     ];
@@ -430,91 +523,50 @@ class Store extends ChangeNotifier {
 
 final store = Store();
 final messenger = GlobalKey<ScaffoldMessengerState>();
-final _player = AudioPlayer();
 final tts = FlutterTts();
-const _moe = 'https://sutian.moe.edu.tw';
 
-/// Mandarin: the phone's zh-TW TTS voice. Taiwanese has no TTS voice, so hok plays the
-/// MOE dictionary recording (native speaker); hok words without one are silent.
-Future<void> play(Word w) async {
-  if (w.lang == 'man') {
+/// Speaks with the phone's voice for the course language.
+Future<void> speak(String text, {bool slow = false}) async {
+  try {
     // Set per call: flutter_tts resets the language to the system default when its engine
     // finishes initializing, so a setLanguage at startup ends up French.
-    await tts.setLanguage('zh-TW');
-    await tts.speak(w.hanzi);
-  } else if (w.audio.isNotEmpty) {
-    await _playMoe(w.audio);
-  }
-}
-
-final _exampleAudio = <int, List<String>>{};
-
-/// Example recordings aren't in the dictionary export: the word's page lists them in
-/// example order (verified on su/1653), so it is fetched once per word when needed.
-// ponytail: scrapes sutian's HTML; if the page layout changes, example audio fails (words still play).
-Future<void> playExample(Word w, int index) async {
-  try {
-    final paths = _exampleAudio[w.moe] ??= RegExp(r'/media/senn/mp3/imtong/(leku/\d+/\d+)\.mp3')
-        .allMatches(await _get('$_moe/zh-hant/su/${w.moe}/').then(utf8.decode))
-        .map((m) => m[1]!)
-        .toSet()
-        .toList();
-    await _playMoe(paths[index]);
+    await tts.setLanguage(store.course.tts);
+    await tts.setSpeechRate(slow ? store.speechRate * 0.55 : store.speechRate);
+    if (await tts.speak(text) != 1) throw Exception();
   } catch (_) {
-    _audioError();
+    messenger.currentState
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Voix ${store.course.native} indisponible'),
+          action: SnackBarAction(label: 'Réglages', onPressed: openTtsSettings),
+        ),
+      );
   }
 }
 
-/// Downloads hok recordings in the background so they play instantly: sutian is in Taiwan,
-/// so a download takes 2-4 s on mobile.
-void prefetch(Iterable<Word> words) {
-  for (final w in words) {
-    if (w.lang == 'hok' && w.audio.isNotEmpty) _moeFile(w.audio).ignore();
-  }
-}
+Future<void> play(Word w, {bool slow = false}) => speak(w.hanzi, slow: slow);
 
-Future<void> _playMoe(String path) async {
+/// Whether the phone has a voice for the course language installed.
+Future<bool> voiceInstalled() async {
   try {
-    await _player.play(DeviceFileSource((await _moeFile(path)).path));
+    final ok = await tts.isLanguageAvailable(store.course.tts);
+    if (ok != true) return false;
+    return Platform.isAndroid ? await tts.isLanguageInstalled(store.course.tts) == true : true;
   } catch (_) {
-    _audioError();
+    return false;
   }
 }
 
-final _downloads = <String, Future<File>>{};
+const android = MethodChannel('lllearner/android');
 
-/// A MOE recording from the app cache, downloaded once. Concurrent requests share one download.
-Future<File> _moeFile(String path) => _downloads[path] ??= () async {
-  try {
-    final file = File('${(await getApplicationCacheDirectory()).path}/audio/${path.replaceAll('/', '_')}.mp3');
-    if (!file.existsSync()) {
-      final part = File('${file.path}.part'); // renamed when complete, so no truncated cache
-      await part.create(recursive: true);
-      await part.writeAsBytes(await _get('$_moe/media/senn/mp3/imtong/$path.mp3'));
-      await part.rename(file.path);
-    }
-    return file;
-  } catch (_) {
-    _downloads.remove(path); // retry on the next tap
-    rethrow;
-  }
-}();
+/// Android's text-to-speech settings, where voices are installed.
+Future<void> openTtsSettings() => android.invokeMethod('openTtsSettings').catchError((_) => null);
 
-final _http = HttpClient(); // shared, so keep-alive skips the TLS handshake after the first download
-
-Future<List<int>> _get(String url) async {
-  final res = await (await _http.getUrl(Uri.parse(url))).close();
-  if (res.statusCode != 200) throw HttpException('${res.statusCode}');
-  return [for (final chunk in await res.toList()) ...chunk];
-}
-
-void _audioError() => messenger.currentState?.showSnackBar(
-  const SnackBar(content: Text('Audio indisponible (connexion internet ?)'), behavior: SnackBarBehavior.floating),
-);
-
-/// Chinese text with the zh-TW locale so traditional glyph variants are used.
-TextStyle zh(double size, {Color? color, FontWeight? weight}) =>
-    TextStyle(fontSize: size, color: color, fontWeight: weight, locale: const Locale('zh', 'TW'), height: 1.2);
+/// Text in the course language, with its locale so the right glyph variants are used
+/// (traditional, Taiwan forms).
+TextStyle script(double size, {Color? color, FontWeight? weight}) =>
+    TextStyle(fontSize: size, color: color, fontWeight: weight, locale: store.course.locale, height: 1.25);
 
 const _tones = {
   'áàâāǎ': 'a',
@@ -527,9 +579,9 @@ const _tones = {
   'ç': 'c',
 };
 
-/// Lowercase without tone marks, accents or hyphens, for search ('tsiah' finds tsia̍h).
+/// Lowercase without tone marks, accents or hyphens, for search ('xiexie' finds xièxie).
 String plain(String s) {
   var r = s.toLowerCase();
   _tones.forEach((k, v) => k.split('').forEach((c) => r = r.replaceAll(c, v)));
-  return r.replaceAll(RegExp('[\\u0300-\\u036f-]'), '');
+  return r.replaceAll(RegExp("[\\u0300-\\u036f'’ -]"), '');
 }

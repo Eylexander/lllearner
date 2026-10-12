@@ -1,51 +1,55 @@
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 import 'coach.dart';
 import 'home.dart';
 import 'lexicon.dart';
+import 'onboarding.dart';
 import 'quiz.dart';
 import 'review.dart';
+import 'settings.dart';
 import 'store.dart';
+import 'theme.dart';
+import 'widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await store.load();
-  tts.setSpeechRate(0.42);
   runApp(const App());
-}
-
-ThemeData _theme(Brightness b) {
-  final cs = ColorScheme.fromSeed(seedColor: const Color(0xFFB7312C), brightness: b); // vermilion
-  return ThemeData(
-    colorScheme: cs,
-    fontFamilyFallback: const ['RareHan'], // only has the rare glyphs; common ones come from the system font
-    scaffoldBackgroundColor: cs.surface,
-    cardTheme: CardThemeData(
-      elevation: 0,
-      color: cs.surfaceContainerLow,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size(0, 52),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-    ),
-  );
 }
 
 class App extends StatelessWidget {
   const App({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'LLLearner',
-    scaffoldMessengerKey: messenger,
-    debugShowCheckedModeBanner: false,
-    theme: _theme(Brightness.light),
-    darkTheme: _theme(Brightness.dark),
-    home: const Shell(),
+  Widget build(BuildContext context) => DynamicColorBuilder(
+    builder: (light, dark) {
+      dynamicColorAvailable = light != null;
+      // Rebuilt only when an appearance setting changes, not on every grade.
+      return ValueListenableBuilder(
+        valueListenable: store.appearance,
+        builder: (context, _, _) {
+          // The wallpaper's primary as seed: the full Material 3 scheme (with every
+          // surface-container role) in the system's colors.
+          ColorScheme scheme(Brightness b, ColorScheme? system) => ColorScheme.fromSeed(
+            seedColor: store.dynamicColor && system != null ? system.primary : seeds[store.seed].color,
+            brightness: b,
+          );
+          return MaterialApp(
+            title: 'LLLearner',
+            scaffoldMessengerKey: messenger,
+            debugShowCheckedModeBanner: false,
+            themeMode: store.themeMode,
+            theme: buildTheme(scheme(Brightness.light, light)),
+            darkTheme: buildTheme(scheme(Brightness.dark, dark)),
+            home: ListenableBuilder(
+              listenable: store,
+              builder: (context, _) => store.onboarded ? const Shell() : const Onboarding(),
+            ),
+          );
+        },
+      );
+    },
   );
 }
 
@@ -71,55 +75,53 @@ class _ShellState extends State<Shell> {
 
   void _fromClaude(String text) {
     final msg = importDeck(text);
-    go(3); // Lexique: imported words are listed first
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('Claude → $msg'), behavior: SnackBarBehavior.floating));
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    go(0); // imported words are the next lessons
+    messenger.currentState?.showSnackBar(SnackBar(content: Text('Assistant IA → $msg')));
   }
+
+  static const _tabs = [
+    (Icons.school_outlined, Icons.school, 'Apprendre'),
+    (Icons.style_outlined, Icons.style, 'Réviser'),
+    (Icons.quiz_outlined, Icons.quiz, 'Pratiquer'),
+    (Icons.menu_book_outlined, Icons.menu_book, 'Lexique'),
+    (Icons.auto_awesome_outlined, Icons.auto_awesome, 'Assistant'),
+  ];
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: store,
     builder: (context, _) {
       final due = store.due.length;
-      final pages = [
-        HomeScreen(go: go),
-        ReviewScreen(go: go),
-        QuizScreen(go: go),
-        const LexiconScreen(),
-        const CoachScreen(),
-      ];
+      final pages = [const LearnTab(), const ReviewTab(), const PracticeTab(), const LexiconTab(), const CoachTab()];
       return Scaffold(
-        body: SafeArea(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            child: KeyedSubtree(key: ValueKey(tab), child: pages[tab]),
-          ),
+        appBar: AppBar(
+          titleSpacing: 12,
+          title: const CourseButton(),
+          actions: [
+            const StreakChip(),
+            IconButton(
+              tooltip: 'Réglages',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => SettingsPage.open(context),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: KeyedSubtree(key: ValueKey(tab), child: pages[tab]),
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: tab,
           onDestinationSelected: go,
           destinations: [
-            const NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home),
-              label: 'Accueil',
-            ),
-            NavigationDestination(
-              icon: Badge(isLabelVisible: due > 0, label: Text('$due'), child: const Icon(Icons.style_outlined)),
-              selectedIcon: const Icon(Icons.style),
-              label: 'Réviser',
-            ),
-            const NavigationDestination(icon: Icon(Icons.quiz_outlined), selectedIcon: Icon(Icons.quiz), label: 'Quiz'),
-            const NavigationDestination(
-              icon: Icon(Icons.menu_book_outlined),
-              selectedIcon: Icon(Icons.menu_book),
-              label: 'Lexique',
-            ),
-            const NavigationDestination(
-              icon: Icon(Icons.auto_awesome_outlined),
-              selectedIcon: Icon(Icons.auto_awesome),
-              label: 'Claude',
-            ),
+            for (final (i, (icon, selected, label)) in _tabs.indexed)
+              NavigationDestination(
+                icon: Badge(isLabelVisible: i == 1 && due > 0, label: Text('$due'), child: Icon(icon)),
+                selectedIcon: Badge(isLabelVisible: i == 1 && due > 0, label: Text('$due'), child: Icon(selected)),
+                label: label,
+              ),
           ],
         ),
       );
