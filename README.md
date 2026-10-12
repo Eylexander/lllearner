@@ -40,7 +40,7 @@ number. The app is distributed through [Eylexander/fdroid](https://github.com/Ey
 releases within 6 hours.
 
 The secrets hold `.secrets/release.p12.b64` and `.secrets/password.txt`. Every release must be signed with this same
-key, or phones refuse the update.
+key (SHA-256 `db171ead…`, shared with Audio Cutter), or phones refuse the update.
 
 ## Data and licences
 
