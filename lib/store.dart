@@ -85,6 +85,25 @@ String formatInterval(double d) => d == 0
 
 typedef Example = ({String hanzi, String roman, String fr});
 
+/// A character: kind 'pictographic', 'ideographic', 'pictophonetic' or '' (unknown), its
+/// components, which of them gives the meaning and which the sound, an English hint, and its
+/// readings with their French meaning ('(en) …' when there's only an English one).
+typedef Char = ({
+  String hanzi,
+  String kind,
+  List<String> parts,
+  String semantic,
+  String phonetic,
+  String hint,
+  List<({String roman, String fr})> readings,
+});
+
+/// The reading of [c] said as [syllable] (same tone, else same letters), else its first one.
+({String roman, String fr})? readingFor(Char c, String syllable) =>
+    c.readings.where((r) => r.roman == syllable.toLowerCase()).firstOrNull ??
+    c.readings.where((r) => plain(r.roman) == plain(syllable)).firstOrNull ??
+    c.readings.firstOrNull;
+
 /// A few new words taught together: introduced one by one, then practised.
 class Lesson {
   Lesson(this.unit, this.number, this.words);
@@ -122,6 +141,7 @@ class Store extends ChangeNotifier {
   static const lessonSize = 6, lessonsPerUnit = 8;
 
   late final Database dict, _db;
+  late final String userDb; // its path, for the reminder that reads it from Kotlin
   Course course = courses.first;
   final Map<String, List<Word>> _decks = {};
   final Map<String, Word> _byKey = {};
@@ -139,6 +159,9 @@ class Store extends ChangeNotifier {
   bool toneColors = true;
   bool hints = true; // pronunciation shown in exercises
   double speechRate = 0.42;
+  Map<String, String>? voice; // {name, locale} of the chosen TTS voice; null = the engine's default
+  bool reminder = false; // daily notification (Reminder.kt)
+  int reminderAt = 19 * 60; // minutes after midnight
   ThemeMode themeMode = ThemeMode.system;
   bool dynamicColor = true;
   int seed = 0;
@@ -150,7 +173,8 @@ class Store extends ChangeNotifier {
   Future<void> load({String? dir}) async {
     dir ??= (await getApplicationSupportDirectory()).path;
     dict = await _openDict(dir);
-    _db = sqlite3.open('$dir/user.db')
+    userDb = '$dir/user.db';
+    _db = sqlite3.open(userDb)
       ..execute('PRAGMA journal_mode = WAL')
       ..execute('PRAGMA synchronous = NORMAL')
       ..execute(
@@ -194,6 +218,9 @@ class Store extends ChangeNotifier {
     toneColors = j['toneColors'] ?? true;
     hints = j['hints'] ?? true;
     speechRate = (j['speechRate'] as num?)?.toDouble() ?? 0.42;
+    voice = (j['voice'] as Map?)?.cast<String, String>();
+    reminder = j['reminder'] ?? false;
+    reminderAt = j['reminderAt'] ?? 19 * 60;
     themeMode = ThemeMode.values.asNameMap()[j['themeMode']] ?? ThemeMode.system;
     dynamicColor = j['dynamicColor'] ?? true;
     seed = j['seed'] ?? 0;
@@ -436,6 +463,47 @@ class Store extends ChangeNotifier {
     return [for (final r in rows) (hanzi: r['hanzi'] as String, roman: r['roman'] as String, fr: r['fr'] as String)];
   }();
 
+  final _chars = <String, Char?>{};
+
+  /// How a character is built and what it means (dict.db `chars`, from Make Me a Hanzi and CFDICT).
+  Char? character(String c) => _chars.putIfAbsent(c, () {
+    final r = dict.select('SELECT * FROM chars WHERE hanzi = ?', [c]).firstOrNull;
+    if (r == null) return null;
+    return (
+      hanzi: c,
+      kind: r['kind'] as String,
+      parts: (r['parts'] as String).characters.toList(),
+      semantic: r['semantic'] as String,
+      phonetic: r['phonetic'] as String,
+      hint: r['hint'] as String,
+      readings: [
+        for (final l in (r['readings'] as String).split('\n'))
+          if (l.split('\t') case [final roman, final fr]) (roman: roman, fr: fr),
+      ],
+    );
+  });
+
+  /// Splits [text] into the course's words, longest match first ('我飽了' → 我 · 飽 · 了). Characters
+  /// that start no word (punctuation, names) come back alone with a null word.
+  // ponytail: greedy longest match, mis-splits some ambiguous runs; a word-frequency segmenter if it matters.
+  List<(String, Word?)> segment(String text) {
+    final c = text.characters.toList();
+    final out = <(String, Word?)>[];
+    for (var i = 0; i < c.length;) {
+      var n = 1;
+      Word? word;
+      for (var len = min(8, c.length - i); len > 0; len--) {
+        if (_byKey['${course.id}:${c.sublist(i, i + len).join()}'] case final w?) {
+          (n, word) = (len, w);
+          break;
+        }
+      }
+      out.add((c.sublist(i, i + n).join(), word));
+      i += n;
+    }
+    return out;
+  }
+
   /// Review: the learner's own grade.
   void grade(Word w, Grade g) {
     _touchDay();
@@ -497,6 +565,9 @@ class Store extends ChangeNotifier {
       'toneColors': toneColors,
       'hints': hints,
       'speechRate': speechRate,
+      'voice': voice,
+      'reminder': reminder,
+      'reminderAt': reminderAt,
       'themeMode': themeMode.name,
       'dynamicColor': dynamicColor,
       'seed': seed,
@@ -535,6 +606,7 @@ Future<void> speak(String text, {bool slow = false}) async {
     // Set per call: flutter_tts resets the language to the system default when its engine
     // finishes initializing, so a setLanguage at startup ends up French.
     await tts.setLanguage(store.course.tts);
+    if (store.voice case final v?) await tts.setVoice(v);
     await tts.setSpeechRate(slow ? store.speechRate * 0.55 : store.speechRate);
     if (await tts.speak(text) != 1) throw Exception();
   } catch (_) {
@@ -559,16 +631,28 @@ Future<bool> voiceInstalled() async {
     // Not tts.isLanguageInstalled: it only checks the first offline voice tagged exactly zh-TW, and
     // Google TTS lists a placeholder first ('zh-TW-language', always notInstalled) before the real
     // voices (cmn-tw-x-ctc-local…). Say no only when none of the offline voices is downloaded.
-    final voices = [
-      for (final v in await tts.getVoices as List? ?? const [])
-        if (v is Map && _speaks('${v['locale']}', store.course.tts)) v,
-    ];
-    return voices.isEmpty ||
-        voices.any((v) => v['network_required'] != '1' && !'${v['features']}'.contains('notInstalled'));
+    final voices = await courseVoices();
+    return voices.isEmpty || voices.any((v) => !isOnline(v) && !isMissing(v));
   } catch (_) {
     return false;
   }
 }
+
+/// The phone's voices for the course language, by name, without Google's placeholder.
+Future<List<Map<String, String>>> courseVoices() async {
+  try {
+    return [
+      for (final v in await tts.getVoices as List? ?? const [])
+        if (v is Map && _speaks('${v['locale']}', store.course.tts) && !'${v['name']}'.endsWith('-language'))
+          {for (final e in v.entries) '${e.key}': '${e.value}'},
+    ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
+  } catch (_) {
+    return [];
+  }
+}
+
+bool isOnline(Map<String, String> voice) => voice['network_required'] == '1';
+bool isMissing(Map<String, String> voice) => '${voice['features']}'.contains('notInstalled');
 
 /// Whether a voice's locale is the language and region of [tag] (zh-TW matches cmn_TW, zh-Hant-TW).
 bool _speaks(String locale, String tag) {
@@ -578,6 +662,13 @@ bool _speaks(String locale, String tag) {
 }
 
 const android = MethodChannel('lllearner/android');
+
+/// Schedules or cancels the daily reminder (Reminder.kt). Called at each launch too, since
+/// Android drops alarms when the app is updated or force-stopped. [ask]: request the
+/// notification permission (Android 13+).
+Future<void> syncReminder({bool ask = false}) => android
+    .invokeMethod('setReminder', {'on': store.reminder, 'minutes': store.reminderAt, 'db': store.userDb, 'ask': ask})
+    .catchError((_) => null);
 
 /// Android's text-to-speech settings, where voices are installed.
 Future<void> openTtsSettings() => android.invokeMethod('openTtsSettings').catchError((_) => null);

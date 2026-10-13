@@ -239,6 +239,7 @@ class _ReviewSessionState extends State<ReviewSession> {
 
   void grade(Grade g) {
     final w = queue.removeAt(0);
+    tts.stop();
     HapticFeedback.selectionClick();
     setState(() {
       revealed = false;

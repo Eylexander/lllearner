@@ -2,8 +2,10 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import 'characters.dart';
 import 'course.dart';
 import 'exercise.dart';
+import 'fiche.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -91,6 +93,7 @@ class _LessonPageState extends State<LessonPage> {
   ];
 
   void next() {
+    tts.stop();
     if (i + 1 >= steps.length) return finish();
     setState(() => i++);
   }
@@ -330,6 +333,10 @@ class _IntroViewState extends State<_IntroView> {
                   ),
                 ),
               ),
+              const SizedBox(height: 20),
+              Text('Les caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
+              const SizedBox(height: 8),
+              CharacterBreakdown(w),
               if (example != null) ...[
                 const SizedBox(height: 20),
                 Text('En contexte', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
@@ -423,7 +430,7 @@ class _Done extends StatelessWidget {
                     FilledButton(
                       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                       onPressed: () =>
-                          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LessonPage(next))),
+                          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LessonFiche(next))),
                       child: const Text('Leçon suivante'),
                     ),
                   const SizedBox(height: 8),

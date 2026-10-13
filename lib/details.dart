@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'characters.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -83,6 +84,10 @@ void showWordSheet(BuildContext context, Word w) {
                   ),
                 ),
               ],
+              const SizedBox(height: 16),
+              Text('Caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
+              const SizedBox(height: 8),
+              CharacterBreakdown(w),
               if (examples.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Text('Exemples', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),

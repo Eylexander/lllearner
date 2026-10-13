@@ -97,6 +97,46 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             const _VoiceTile(),
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('Choisir la voix'),
+              subtitle: Text(store.voice?['name'] ?? 'Voix par défaut du téléphone'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showVoices(context),
+            ),
+            header('Rappel'),
+            SwitchListTile(
+              secondary: const Icon(Icons.notifications_outlined),
+              title: const Text('Rappel quotidien'),
+              subtitle: Text(
+                store.reminder
+                    ? 'Chaque jour à ${_time(store.reminderAt)}, sauf si vous avez déjà pratiqué et qu’aucune '
+                          'révision n’attend'
+                    : 'Une notification pour ne pas oublier vos révisions',
+              ),
+              value: store.reminder,
+              onChanged: (v) {
+                store.set(() => store.reminder = v);
+                syncReminder(ask: v);
+              },
+            ),
+            ListTile(
+              enabled: store.reminder,
+              leading: const Icon(Icons.schedule),
+              title: const Text('Heure du rappel'),
+              trailing: Text(_time(store.reminderAt), style: tt.titleMedium),
+              onTap: () async {
+                final t = await showTimePicker(
+                  context: context,
+                  initialTime: TimeOfDay(hour: store.reminderAt ~/ 60, minute: store.reminderAt % 60),
+                  builder: (context, child) =>
+                      MediaQuery(data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true), child: child!),
+                );
+                if (t == null) return;
+                store.set(() => store.reminderAt = t.hour * 60 + t.minute);
+                syncReminder();
+              },
+            ),
             header('Apparence'),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -169,6 +209,7 @@ class SettingsPage extends StatelessWidget {
               subtitle: const Text(
                 'Vocabulaire : listes TOCFL. Traductions : CFDICT (CC BY-SA 3.0, chine-informations.com). '
                 'Exemples : Tatoeba (CC BY 2.0 FR, tatoeba.org). '
+                'Formation des caractères : Make Me a Hanzi (LGPL 3, github.com/skishore/makemeahanzi). '
                 'Code source : github.com/Eylexander/LLLearner. ',
               ),
               isThreeLine: true,
@@ -177,6 +218,82 @@ class SettingsPage extends StatelessWidget {
           ],
         );
       },
+    ),
+  );
+}
+
+String _time(int minutes) => '${minutes ~/ 60}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+/// The course language's voices on the phone: Google's Taiwan voices differ, some handle tones
+/// better. Picking one reads a sample, so they can be compared.
+void _showVoices(BuildContext context) {
+  final sample = store.course.sentenceHint.split(' / ').first;
+  void pick(Map<String, String>? v) {
+    store.set(() => store.voice = v == null ? null : {'name': v['name']!, 'locale': v['locale']!});
+    speak(sample);
+  }
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) => FutureBuilder(
+      future: courseVoices(),
+      builder: (context, snap) => ListenableBuilder(
+        listenable: store,
+        builder: (context, _) {
+          final cs = Theme.of(context).colorScheme;
+          final voices = snap.data ?? const [];
+          Widget tile(String title, String subtitle, Map<String, String>? v, {bool enabled = true}) {
+            final selected = store.voice?['name'] == v?['name'];
+            return ListTile(
+              enabled: enabled,
+              title: Text(title),
+              subtitle: Text(subtitle),
+              trailing: selected ? Icon(Icons.check_circle, color: cs.primary) : null,
+              selected: selected,
+              onTap: () => pick(v),
+            );
+          }
+
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.only(bottom: 24),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+                  child: Text('Voix ${store.course.native}', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                  child: Text(
+                    'Touchez une voix pour l’écouter : certaines rendent mieux les tons que d’autres.',
+                    style: TextStyle(color: cs.onSurfaceVariant),
+                  ),
+                ),
+                tile('Par défaut', 'Celle des réglages de synthèse vocale', null),
+                if (snap.connectionState != ConnectionState.done)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                for (final (i, v) in voices.indexed)
+                  tile(
+                    'Voix ${i + 1}',
+                    [
+                      v['name']!,
+                      if (isOnline(v)) 'en ligne',
+                      if (isMissing(v)) 'à télécharger dans les réglages de synthèse vocale',
+                    ].join(' · '),
+                    v,
+                    enabled: !isMissing(v),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     ),
   );
 }

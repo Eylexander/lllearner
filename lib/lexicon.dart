@@ -88,7 +88,7 @@ class _LexiconTabState extends State<LexiconTab> {
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                         child: Text(
                           '${list.length} mots · listes TOCFL · traductions CFDICT (CC BY-SA 3.0, chine-informations.com) '
-                          '· exemples Tatoeba (CC BY 2.0 FR, tatoeba.org)',
+                          '· exemples Tatoeba (CC BY 2.0 FR, tatoeba.org) · caractères Make Me a Hanzi (LGPL 3)',
                           style: tt.labelSmall?.copyWith(color: cs.outline),
                         ),
                       );

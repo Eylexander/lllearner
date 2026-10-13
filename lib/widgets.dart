@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'characters.dart';
 import 'course.dart';
+import 'details.dart';
 import 'pinyin.dart';
 import 'store.dart';
 import 'theme.dart';
@@ -438,55 +440,153 @@ Future<bool> confirmQuit(BuildContext context, String message) async =>
     ) ??
     false;
 
-/// A tappable example sentence: characters (the word highlighted), pinyin, French.
-class ExampleTile extends StatelessWidget {
+/// An example sentence: characters, pinyin, French. Each word of it is a box (the [highlight]ed
+/// one in the primary color); tapping one selects it and opens it below the sentence, with its
+/// characters taken apart, without leaving the page. The speaker or the translation reads it.
+class ExampleTile extends StatefulWidget {
   const ExampleTile(this.example, {super.key, this.highlight = ''});
   final Example example;
   final String highlight;
 
   @override
+  State<ExampleTile> createState() => _ExampleTileState();
+}
+
+class _ExampleTileState extends State<ExampleTile> {
+  Word? selected;
+
+  void select(Word w) {
+    setState(() => selected = selected == w ? null : w);
+    if (selected != null) play(w);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final parts = highlight.isEmpty ? [example.hanzi] : example.hanzi.split(highlight);
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => speak(example.hanzi),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 2, right: 12),
-              child: Icon(Icons.volume_up_outlined, size: 20, color: cs.primary),
+    final e = widget.example, h = widget.highlight;
+    final target = h.isEmpty ? null : store.byKey('${store.course.id}:$h');
+    final segments = [
+      for (final (i, p) in (h.isEmpty ? [e.hanzi] : e.hanzi.split(h)).indexed) ...[
+        if (i > 0) (h, target, true),
+        for (final (s, w) in store.segment(p)) (s, w, false),
+      ],
+    ];
+    Widget box(String s, Word? w, bool isTarget) {
+      final text = Text(
+        s,
+        style: script(20, color: isTarget ? cs.primary : null, weight: isTarget ? FontWeight.w700 : null),
+      );
+      if (w == null) return Padding(padding: const EdgeInsets.only(top: 2, bottom: 4), child: text);
+      final on = w == selected;
+      return Material(
+        color: on ? cs.primaryContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => select(w),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(2, 2, 2, 1),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: on || isTarget ? cs.primary : cs.outlineVariant, width: on ? 3 : 2),
+              ),
             ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text.rich(
-                    TextSpan(
-                      style: script(18),
-                      children: [
-                        for (final (i, p) in parts.indexed) ...[
-                          if (i > 0)
-                            TextSpan(
-                              text: highlight,
-                              style: TextStyle(color: cs.primary, fontWeight: FontWeight.w700),
-                            ),
-                          TextSpan(text: p),
+            child: text,
+          ),
+        ),
+      );
+    }
+
+    final w = selected;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                tooltip: 'Écouter la phrase',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => speak(e.hanzi),
+                icon: Icon(Icons.volume_up_outlined, size: 20, color: cs.primary),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(spacing: 4, runSpacing: 6, children: [for (final (s, w, t) in segments) box(s, w, t)]),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () => speak(e.hanzi),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (store.pron != Pron.zhuyin)
+                            Text(e.roman, style: tt.bodyMedium?.copyWith(color: cs.primary)),
+                          Text(e.fr, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                         ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            alignment: Alignment.topCenter,
+            child: w == null
+                ? const SizedBox(width: double.infinity)
+                : Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 14),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: cs.primary, width: 2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Hanzi(w.hanzi, w.roman, size: 28, weight: FontWeight.w600),
+                            const SizedBox(width: 10),
+                            Expanded(child: Pronunciation(w, size: 16, align: TextAlign.start)),
+                            IconButton(
+                              tooltip: 'Écouter',
+                              onPressed: () => play(w),
+                              icon: const Icon(Icons.volume_up_rounded),
+                            ),
+                            IconButton(
+                              tooltip: 'Tout sur ce mot',
+                              onPressed: () => showWordSheet(context, w),
+                              icon: const Icon(Icons.open_in_new),
+                            ),
+                            IconButton(
+                              tooltip: 'Fermer',
+                              onPressed: () => setState(() => selected = null),
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8, bottom: 8),
+                          child: Text(w.fr, style: tt.titleMedium),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: CharacterBreakdown(w, key: ValueKey(w.key)),
+                        ),
                       ],
                     ),
                   ),
-                  if (store.pron != Pron.zhuyin) Text(example.roman, style: tt.bodyMedium?.copyWith(color: cs.primary)),
-                  Text(example.fr, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

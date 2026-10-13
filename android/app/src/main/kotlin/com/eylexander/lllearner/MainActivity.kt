@@ -1,7 +1,10 @@
 package com.eylexander.lllearner
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import io.flutter.embedding.android.FlutterActivity
@@ -10,7 +13,8 @@ import io.flutter.plugin.common.MethodChannel
 
 // Bridge to the Claude app (see lib/coach.dart): opens Claude directly with a
 // prefilled message, and receives text shared back from Claude. Also opens the
-// text-to-speech settings, where the course language's voice is installed.
+// text-to-speech settings, where the course language's voice is installed, and sets the
+// daily reminder (Reminder.kt).
 class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var pendingShare: String? = null
@@ -39,6 +43,14 @@ class MainActivity : FlutterActivity() {
         MethodChannel(engine.dartExecutor.binaryMessenger, "lllearner/android").setMethodCallHandler { call, result ->
             when (call.method) {
                 "openTtsSettings" -> result.success(openTtsSettings())
+                "setReminder" -> {
+                    val on = call.argument<Boolean>("on")!!
+                    Reminder.set(this, on, call.argument<Int>("minutes")!!, call.argument<String>("db")!!)
+                    if (on && call.argument<Boolean>("ask") == true && Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }

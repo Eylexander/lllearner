@@ -15,6 +15,7 @@ import 'widgets.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await store.load();
+  syncReminder();
   runApp(const App());
 }
 
@@ -38,6 +39,7 @@ class App extends StatelessWidget {
           return MaterialApp(
             title: 'LLLearner',
             scaffoldMessengerKey: messenger,
+            navigatorObservers: [_stopSpeech],
             debugShowCheckedModeBanner: false,
             themeMode: store.themeMode,
             theme: buildTheme(scheme(Brightness.light, light)),
@@ -52,6 +54,17 @@ class App extends StatelessWidget {
     },
   );
 }
+
+/// Leaving a page or a sheet (back, close, next lesson) cuts off the word or sentence being read.
+class _StopSpeech extends NavigatorObserver {
+  @override
+  void didPop(Route route, Route? previousRoute) => tts.stop();
+
+  @override
+  void didReplace({Route? newRoute, Route? oldRoute}) => tts.stop();
+}
+
+final _stopSpeech = _StopSpeech();
 
 class Shell extends StatefulWidget {
   const Shell({super.key});

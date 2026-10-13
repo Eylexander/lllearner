@@ -65,9 +65,14 @@ Exercise? makeExercise(Word w, Kind kind, List<Word> pool, Random rng, {Set<Word
           )
           .toList()
         ..shuffle(rng);
-  // Words already seen first (learned, or in [familiar], e.g. the lesson's), then the
-  // same theme: the choice is then about the word, not about recognizing a stranger.
-  int rank(Word o) => (!o.isNew || familiar.contains(o) ? 0 : 2) + (o.tag == w.tag ? 0 : 1);
+  // Look-alikes, so no option can be ruled out without knowing the word: words already seen
+  // (learned, or in [familiar], e.g. the lesson's) rather than strangers, as many characters
+  // as the answer, sharing one of its characters, same theme.
+  int rank(Word o) =>
+      (!o.isNew || familiar.contains(o) ? 0 : 6) +
+      (o.hanzi.length == w.hanzi.length ? 0 : 3) +
+      (o.tag == w.tag ? 0 : 1) -
+      (o.hanzi.split('').any(w.hanzi.contains) ? 1 : 0);
   others.sort((a, b) => rank(a).compareTo(rank(b)));
   final picked = <Word>[];
   for (final o in others) {
@@ -97,6 +102,8 @@ class ExerciseView extends StatefulWidget {
 }
 
 class _ExerciseViewState extends State<ExerciseView> {
+  /// "Je ne sais pas": a miss that shows the answer, instead of guessing.
+  static const _dunno = Option('');
   Option? picked;
 
   Exercise get ex => widget.exercise;
@@ -194,6 +201,14 @@ class _ExerciseViewState extends State<ExerciseView> {
                 ),
                 const SizedBox(height: 10),
               ],
+              if (picked == null)
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => answer(_dunno),
+                    icon: const Icon(Icons.help_outline),
+                    label: const Text('Je ne sais pas'),
+                  ),
+                ),
             ],
           ),
         ),
@@ -202,7 +217,7 @@ class _ExerciseViewState extends State<ExerciseView> {
           curve: Curves.easeOut,
           child: picked == null
               ? const SizedBox(width: double.infinity)
-              : _Feedback(ex, picked!.correct, widget.onDone),
+              : _Feedback(ex, picked!.correct, widget.onDone, unknown: picked == _dunno),
         ),
       ],
     );
@@ -292,9 +307,9 @@ class _OptionTile extends StatelessWidget {
 }
 
 class _Feedback extends StatelessWidget {
-  const _Feedback(this.ex, this.correct, this.onDone);
+  const _Feedback(this.ex, this.correct, this.onDone, {this.unknown = false});
   final Exercise ex;
-  final bool correct;
+  final bool correct, unknown;
   final ValueChanged<bool> onDone;
 
   @override
@@ -320,7 +335,11 @@ class _Feedback extends StatelessWidget {
                   Icon(correct ? Icons.check_circle : Icons.info, color: fg),
                   const SizedBox(width: 8),
                   Text(
-                    correct ? 'Bien joué !' : 'Pas tout à fait',
+                    correct
+                        ? 'Bien joué !'
+                        : unknown
+                        ? 'La réponse était'
+                        : 'Pas tout à fait',
                     style: tt.titleLarge?.copyWith(color: fg, fontWeight: FontWeight.w700),
                   ),
                   const Spacer(),

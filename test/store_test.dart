@@ -127,6 +127,9 @@ void main() {
       s.pron = Pron.both;
       s.dynamicColor = false;
       s.seed = 2;
+      s.voice = {'name': 'cmn-tw-x-ctd-local', 'locale': 'zh-TW'};
+      s.reminder = true;
+      s.reminderAt = 8 * 60 + 30;
     });
     s.grade(s.byKey('man:你好')!, Grade.good);
 
@@ -134,6 +137,7 @@ void main() {
     expect(again.words.first.key, 'man:鹹酥雞');
     expect(again.byKey('man:你好')!.reps, 1);
     expect((again.onboarded, again.pron, again.dynamicColor, again.seed), (true, Pron.both, false, 2));
+    expect((again.voice?['name'], again.reminder, again.reminderAt), ('cmn-tw-x-ctd-local', true, 510));
   });
 
   test('example sentences, chosen for the word or found by search', () async {
@@ -161,6 +165,12 @@ void main() {
         expect(ex.options.where((o) => o.correct), hasLength(1));
         expect(ex.options.map((o) => o.text).toSet(), hasLength(4));
       }
+    }
+    // Wrong answers look like the right one: as many characters, when the pool has enough.
+    final near = s.words.take(60).toList();
+    for (final w in lesson.words) {
+      final ex = makeExercise(w, Kind.recall, near, rng)!;
+      expect(ex.options.map((o) => o.text.length).toSet(), {w.hanzi.length}, reason: w.hanzi);
     }
     // 你好 'Bonjour' and 早安 'Bonjour (le matin)' mean the same: never options together.
     final hello = s.byKey('man:你好')!;
@@ -219,6 +229,25 @@ void main() {
     expect(d.last.roman, 'jiéyùn zhàn');
     expect(d.first.tag, 'Assistant IA');
     expect(() => Store.parseDeck('pas de json', lang: 'man'), throwsFormatException);
+  });
+
+  test('segment splits a sentence into the longest deck words', () async {
+    final s = await fresh();
+    String split(String t) => [for (final (p, w) in s.segment(t)) w == null ? '($p)' : p].join(' ');
+    expect(split('我飽了。'), '我 飽 了 (。)');
+    expect(split('我們喜歡喝茶'), '我們 喜歡 喝 茶');
+  });
+
+  test('characters: how they are built and their reading in a word', () async {
+    final s = await fresh();
+    final bao = s.character('飽')!;
+    expect((bao.kind, bao.semantic, bao.phonetic), ('pictophonetic', '飠', '包'));
+    expect(s.character('飠')!.readings.first.fr, contains('nourriture'));
+    final hao = s.character('好')!;
+    expect(hao.parts, ['女', '子']);
+    expect(readingFor(hao, 'hào')!.fr, startsWith('Avoir'));
+    expect(readingFor(hao, 'hao')!.roman, 'hǎo'); // letters only: the first such reading
+    expect(s.character('x'), isNull);
   });
 
   test('plain strips tones, accents, apostrophes and spaces for search', () {

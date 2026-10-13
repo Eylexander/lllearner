@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'fiche.dart';
 import 'lesson.dart';
 import 'review.dart';
 import 'store.dart';
@@ -128,6 +129,13 @@ class _TodayCard extends StatelessWidget {
                       : 'Continuer · ${next!.unit.name}, leçon ${next!.number}',
                   overflow: TextOverflow.ellipsis,
                 ),
+              ),
+            if (next != null)
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: cs.onPrimaryContainer),
+                onPressed: () => LessonFiche.open(context, next!),
+                icon: const Icon(Icons.article_outlined),
+                label: const Text('Lire la fiche de la leçon d’abord'),
               )
             else
               Text('Vous avez appris tout le cours. 太厲害了！', style: tt.titleMedium, textAlign: TextAlign.center),
@@ -241,7 +249,7 @@ class _LessonButton extends StatelessWidget {
         shape: CircleBorder(side: current ? BorderSide(color: cs.primary, width: 3) : BorderSide.none),
         child: InkWell(
           customBorder: const CircleBorder(),
-          onTap: () => LessonPage.open(context, lesson),
+          onTap: () => LessonFiche.open(context, lesson),
           child: SizedBox.square(
             dimension: current ? 52 : 44,
             child: Center(

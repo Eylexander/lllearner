@@ -48,5 +48,6 @@ key (SHA-256 `db171ead…`, shared with Audio Cutter), or phones refuse the upda
 
 - Mandarin word list: TOCFL. French glosses: CFDICT (CC BY-SA 3.0, chine-informations.com).
 - Example sentences: Tatoeba (CC BY 2.0 FR, tatoeba.org), converted to Taiwan characters with OpenCC.
+- Character composition: Make Me a Hanzi `dictionary.txt` (LGPL 3, github.com/skishore/makemeahanzi).
 
 Developer notes are in [CLAUDE.md](CLAUDE.md).

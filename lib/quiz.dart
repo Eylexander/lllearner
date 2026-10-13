@@ -174,7 +174,10 @@ class _QuizSessionState extends State<QuizSession> {
             }
             store.quizAnswer(q.word, ok);
           },
-          onDone: (_) => setState(() => i++),
+          onDone: (_) {
+            tts.stop();
+            setState(() => i++);
+          },
         ),
       ),
     );

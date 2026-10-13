@@ -9,8 +9,11 @@ Sources (download each into its own scratch dir, then pass the paths):
   curl -LO https://downloads.tatoeba.org/exports/per_language/cmn/cmn_sentences.tsv.bz2
   curl -LO https://downloads.tatoeba.org/exports/per_language/fra/fra_sentences.tsv.bz2
   curl -LO https://downloads.tatoeba.org/exports/per_language/cmn/cmn-fra_links.tsv.bz2
+  # Make Me a Hanzi character composition, LGPL 3:
+  curl -LO https://raw.githubusercontent.com/skishore/makemeahanzi/master/dictionary.txt
   pip install dragonmapper opencc-python-reimplemented               # pinyin -> zhuyin, 简 -> 繁
-  python tool/build_words.py cfdict.u8 tocfl-202307.csv <tatoeba dir> assets/
+  python tool/build_words.py cfdict.u8 tocfl-202307.csv <tatoeba dir> assets/ dictionary.txt
+  python tool/build_words.py --chars cfdict.u8 dictionary.txt assets/  # only (re)adds the chars table
 
 Tables:
   words(lang, pos, hanzi, roman, zhuyin, fr, tag) in study order (pos): hand-written
@@ -19,7 +22,11 @@ Tables:
     vocabulary (OpenCC s2twp); roman is pinyin from the deck's readings (TOCFL, so
     Taiwan pronunciations) and CFDICT for other words;
   examples(lang, hanzi, n, sid): up to 3 sentences per word, preferring short ones whose
-    other words are no harder than the word itself.
+    other words are no harder than the word itself;
+  chars(hanzi, kind, parts, semantic, phonetic, hint, readings): how each character is built,
+    from Make Me a Hanzi (kind pictographic / ideographic / pictophonetic, its components, the
+    meaning and sound components, an English hint), and its readings 'pinyin<TAB>French gloss'
+    one per line, from CFDICT, else RADICALS for radical forms, else '(en) ' + the English one.
 
 Mandarin: the TOCFL list with CFDICT glosses. The CFDICT reading is chosen to match
 TOCFL's pinyin (letters and tones). FR_FIX corrects automatic glosses.
@@ -96,6 +103,25 @@ FR_FIX = {}
 # dictionary-first reading (的 de, not dí).
 PARTICLES = {'的': 'de', '了': 'le', '著': 'zhe', '得': 'de', '個': 'ge', '們': 'men', '嗎': 'ma', '呢': 'ne',
              '吧': 'ba', '啊': 'a', '呀': 'ya', '喔': 'o', '啦': 'la'}
+
+# French for radical forms and components CFDICT doesn't have as characters.
+RADICALS = {
+    '扌': 'main', '辶': 'marcher', '糹': 'soie ; fil', '纟': 'soie ; fil', '⺼': 'chair ; corps', '忄': 'cœur ; sentiment',
+    '阝': 'colline (à gauche) ; ville (à droite)', '釒': 'métal', '钅': 'métal', '刂': 'couteau', '⺈': 'couteau',
+    '广': 'abri ; bâtiment', '犭': 'chien ; animal', '丷': 'deux points', '尸': 'corps ; cadavre', '飠': 'nourriture ; manger',
+    '饣': 'nourriture ; manger', '罒': 'filet', '衤': 'vêtement', '儿': 'enfant ; jambes', '厂': 'falaise ; abri',
+    '礻': 'autel ; esprit', '户': 'porte', '乚': 'crochet', '爿': 'planche', '爫': 'griffe ; main', '氵': 'eau',
+    '亻': 'personne', '讠': 'parole', '艹': 'herbe', '⺌': 'petit', '耂': 'vieux', '巛': 'rivière', '覀': 'couvrir',
+    '冫': 'glace', '疒': 'maladie', '癶': 'pieds', '彳': 'pas', '攵': 'frapper ; action', '夂': 'marcher lentement',
+    '卩': 'sceau', '㔾': 'sceau', '匚': 'boîte', '勹': 'envelopper', '彡': 'poils ; ornement', '廴': 'avancer',
+    '亠': 'couvercle', '冖': 'couvercle', '宀': 'toit', '灬': 'feu', '丶': 'point', '丿': 'trait', '亅': 'crochet',
+    '冂': 'enceinte', '凵': 'récipient', '厶': 'privé', '囗': 'enclos', '⺊': 'divination', '龶': 'pousse',
+    '⺮': 'bambou', '𥫗': 'bambou', '⺶': 'mouton', '⺧': 'bœuf', '牜': 'bœuf', '⺗': 'cœur', '⺆': 'enceinte',
+    '𠂉': 'homme', '⺄': 'second', '⺝': 'lune ; mois', '⻊': 'pied', '𧾷': 'pied', '⻌': 'marcher', '⻏': 'ville',
+    '⻖': 'colline', '⺣': 'feu', '⺡': 'eau', '⺅': 'personne', '⺘': 'main', '⺖': 'cœur', '⺾': 'herbe',
+    '果': 'fruit ; résultat', '周': 'tour ; semaine', '台': 'plateforme ; Taïwan',
+}
+IDC = '⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻'
 
 NOISE = re.compile(r'^(variante|voir |cf\.|CL:|nom de famille|abr[ée]v|forme ancienne|\(?arch)|\((argot|vulg|péj)', re.I)
 PUNCT = {'，': ',', '。': '.', '？': '?', '！': '!', '：': ':', '；': ';', '、': ',', '「': '“', '」': '”', '…': '…'}
@@ -250,7 +276,74 @@ def sentence_pinyin(tokens, deck_pron, pron):
     return re.sub(r'(^|[.?!] )(\w)', lambda m: m[1] + m[2].upper(), ' '.join(words))
 
 
-def main(cfdict_path, tocfl_path, tatoeba_dir, out_dir):
+def parts(ids):
+    """'⿰女子' -> ['女', '子']: the top-level components of an ideographic description; one
+    without a character of its own is replaced by its pieces, unknown ones (？) dropped."""
+    pos = 0
+
+    def node():
+        nonlocal pos
+        c = ids[pos]
+        pos += 1
+        return [node() for _ in range(3 if c in '⿲⿳' else 2)] if c in IDC else c
+
+    def leaves(n):
+        return [n] if isinstance(n, str) else [x for c in n for x in leaves(c)]
+
+    try:
+        tree = node()
+    except IndexError:
+        tree = list(ids)
+    out = [] if isinstance(tree, str) else [x for c in tree for x in leaves(c)]
+    return [c for c in out if c not in IDC and c != '？']
+
+
+def add_chars(cfdict_path, mmah_path, out_dir):
+    """(Re)writes the chars table of dict.db and bumps its version; nothing else changes."""
+    import os
+    import sqlite3
+    import time
+    readings = {}  # hanzi -> {pinyin: French}, traditional entries before simplified ones
+    for pass_ in (0, 1):
+        for line in open(cfdict_path, encoding='utf-8'):
+            m = re.match(r'(\S+) (\S+) \[([^\]]*)\] /(.*)/\s*$', line)
+            if m and len(m[pass_ + 1]) == 1 and not m[3][:1].isupper():
+                readings.setdefault(m[pass_ + 1], {}).setdefault(marked(m[3]), gloss(m[4]))
+    mmah = {j['character']: j for j in map(json.loads, open(mmah_path, encoding='utf-8'))}
+    rows = {}
+    for c, j in mmah.items():
+        e = j.get('etymology') or {}
+        ps = parts(j.get('decomposition', ''))
+        rows[c] = [e.get('type', ''), ''.join(ps), e.get('semantic', ''), e.get('phonetic', ''), e.get('hint', '')]
+        for p in ps + [e.get('semantic', ''), e.get('phonetic', '')]:
+            if p and p not in mmah:
+                rows.setdefault(p, ['', '', '', '', ''])
+
+    def reading(c):
+        if c in RADICALS:
+            return f'{"/".join(mmah.get(c, {}).get("pinyin", []))}\t{RADICALS[c]}'
+        if c in readings:
+            return '\n'.join(f'{p}\t{fr}' for p, fr in readings[c].items())
+        j = mmah.get(c, {})
+        return f'{"/".join(j.get("pinyin", []))}\t(en) {j["definition"]}' if j.get('definition') else ''
+
+    db = sqlite3.connect(f'{out_dir}/dict.db')
+    db.executescript('''
+        DROP TABLE IF EXISTS chars;
+        CREATE TABLE chars(hanzi TEXT PRIMARY KEY, kind TEXT, parts TEXT, semantic TEXT, phonetic TEXT, hint TEXT,
+                           readings TEXT);
+    ''')
+    db.executemany('INSERT INTO chars VALUES (?,?,?,?,?,?,?)', [(c, *r, reading(c)) for c, r in rows.items()])
+    version = int(time.time())
+    db.execute(f'PRAGMA user_version = {version}')
+    db.commit()
+    db.execute('VACUUM')
+    db.close()
+    open(os.path.join(out_dir, 'dict.version'), 'w').write(f'{version}\n')
+    print(f'chars: {len(rows)}, {sum(1 for c in rows if not reading(c))} without a reading')
+
+
+def main(cfdict_path, tocfl_path, tatoeba_dir, out_dir, mmah_path):
     tocfl = list(csv.DictReader(open(tocfl_path, encoding='utf-8')))
     reading = {}
     for r in tocfl:
@@ -314,7 +407,11 @@ def main(cfdict_path, tocfl_path, tatoeba_dir, out_dir):
     rare = {c for r in man for c in r[0] if 0x3400 <= ord(c) <= 0x4DBF or ord(c) > 0xFFFF}
     print(f'man: {len(man)} words, {len(sentences)} sentences, '
           f'{len({h for _, h, _, _ in examples})} words with examples; rare characters: {"".join(rare) or "none"}')
+    add_chars(cfdict_path, mmah_path, out_dir)
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:5])
+    if sys.argv[1] == '--chars':
+        add_chars(*sys.argv[2:5])
+    else:
+        main(*sys.argv[1:6])

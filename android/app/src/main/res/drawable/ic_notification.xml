@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar icon of the daily reminder: the launcher's bubble and 文 (ic_launcher_foreground.xml),
+     cropped to the bubble. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <group android:translateX="-26" android:translateY="-26">
+        <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineJoin="round"
+            android:strokeLineCap="round"
+            android:pathData="M41,31 H67 A11,11 0 0 1 78,42 V58 A11,11 0 0 1 67,69 H51 L40,77 L41.5,69 A11,11 0 0 1 30,58 V42 A11,11 0 0 1 41,31 Z" />
+        <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineCap="round"
+            android:pathData="M54,37.5 V40.5 M43.5,44 H64.5 M59.5,44.5 C58,52 52.5,58.5 44,62 M48.5,44.5 C50,52 55.5,58.5 64,62" />
+    </group>
+</vector>

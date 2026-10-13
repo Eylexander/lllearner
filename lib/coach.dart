@@ -45,6 +45,18 @@ String _profile() {
 - Erreurs récentes : ${recent.isEmpty ? 'aucune' : recent.map(fmt).join(', ')}.''';
 }
 
+/// Opens the assistant with [task] after the learner profile.
+Future<void> askAssistant(String task) async {
+  final prompt = '${_profile()}\n\n$task';
+  if (await claude.invokeMethod<bool>('openClaude', prompt).catchError((_) => false) ?? false) return;
+  // Assistant app not installed (or refused the intent): generic share sheet.
+  await Clipboard.setData(ClipboardData(text: prompt));
+  messenger.currentState
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(const SnackBar(content: Text('Assistant IA introuvable — message copié')));
+  await SharePlus.instance.share(ShareParams(text: prompt));
+}
+
 /// The "Assistant" tab.
 class CoachTab extends StatefulWidget {
   const CoachTab({super.key});
@@ -67,15 +79,6 @@ class _CoachTabState extends State<CoachTab> {
   void _snack(String msg) => ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(msg)));
-
-  Future<void> send(String task) async {
-    final prompt = '${_profile()}\n\n$task';
-    if (await claude.invokeMethod<bool>('openClaude', prompt).catchError((_) => false) ?? false) return;
-    // Assistant app not installed (or refused the intent): generic share sheet.
-    await Clipboard.setData(ClipboardData(text: prompt));
-    _snack('Assistant IA introuvable — message copié');
-    await SharePlus.instance.share(ShareParams(text: prompt));
-  }
 
   void import() {
     _snack(importDeck(deck.text));
@@ -106,7 +109,7 @@ class _CoachTabState extends State<CoachTab> {
           icon: Icons.auto_stories,
           title: 'Leçon sur mesure',
           subtitle: 'Vos mots difficiles en contexte, et 8 nouveaux mots à importer',
-          onTap: () => send(
+          onTap: () => askAssistant(
             'Crée-moi une leçon de 15 minutes adaptée à ce profil : réutilise mes mots difficiles dans des phrases, '
             'introduis 8 nouveaux mots utiles au quotidien, puis un court dialogue avec ${c.romanization} et '
             'traduction. Ajoute 3 petits exercices (j’y répondrai ensuite). $_deckFormat',
@@ -116,7 +119,7 @@ class _CoachTabState extends State<CoachTab> {
           icon: Icons.psychology,
           title: 'Expliquer mes erreurs',
           subtitle: 'Moyens mnémotechniques, pièges de tons, exemples',
-          onTap: () => send(
+          onTap: () => askAssistant(
             'Explique-moi mes erreurs récentes et mes mots difficiles : pour chacun, un moyen mnémotechnique '
             '(décomposition des caractères), le piège de prononciation ou de ton, et 2 phrases d’exemple. '
             'Termine par un mini-quiz de 5 questions et attends mes réponses.',
@@ -126,7 +129,7 @@ class _CoachTabState extends State<CoachTab> {
           icon: Icons.menu_book,
           title: 'Petite histoire',
           subtitle: 'Un court texte avec uniquement les mots que je connais',
-          onTap: () => send(
+          onTap: () => askAssistant(
             'Écris une très courte histoire (6 à 8 phrases) en utilisant presque uniquement mes derniers mots '
             'appris et des mots plus simples. Donne chaque phrase en caractères, puis en ${c.romanization}, puis '
             'en français, et pose-moi 3 questions de compréhension à la fin.',
@@ -156,7 +159,7 @@ class _CoachTabState extends State<CoachTab> {
                     for (final MapEntry(key: label, value: where) in c.scenarios.entries)
                       ActionChip(
                         label: Text(label),
-                        onPressed: () => send(
+                        onPressed: () => askAssistant(
                           'Jouons une conversation $where. Tu joues mon interlocuteur, moi l’apprenant. Règles : une '
                           'seule réplique à la fois, simple et adaptée à mon niveau (réutilise mes mots), avec '
                           '${c.romanization} et la traduction française entre parenthèses. Après chacune de mes '
@@ -194,7 +197,7 @@ class _CoachTabState extends State<CoachTab> {
                 FilledButton.tonalIcon(
                   onPressed: () {
                     if (sentence.text.trim().isEmpty) return;
-                    send(
+                    askAssistant(
                       'Corrige cette phrase que j’ai écrite (caractères et/ou ${c.romanization}) : '
                       '« ${sentence.text.trim()} ». Explique les erreurs en français (tons, grammaire, mot plus '
                       'naturel à Taïwan), donne la version la plus naturelle (caractères + ${c.romanization}) et '
