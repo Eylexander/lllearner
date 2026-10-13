@@ -21,6 +21,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appName"] = "LLLearner"
     }
 
     // Release key: .secrets/release.p12 + .secrets/password.txt (git-ignored, on the dev PC), or the
@@ -44,6 +45,12 @@ android {
     }
 
     buildTypes {
+        // Debug builds are signed with the local debug key, so they get their own package: installing one
+        // over the published app (release key) would make flutter run uninstall it, with its progress.
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appName"] = "LLLearner (dev)"
+        }
         release {
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
