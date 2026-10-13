@@ -57,8 +57,10 @@ class MainActivity : FlutterActivity() {
         return false
     }
 
+    // Not when reopened from recents: Android replays the share that started the task.
     private fun sharedText(i: Intent?) =
-        if (i?.action == Intent.ACTION_SEND) i.getStringExtra(Intent.EXTRA_TEXT) else null
+        if (i?.action == Intent.ACTION_SEND && (i.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0)
+            i.getStringExtra(Intent.EXTRA_TEXT) else null
 
     private fun openClaude(text: String) = try {
         startActivity(

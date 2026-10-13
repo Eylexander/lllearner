@@ -31,7 +31,10 @@ enum Mode {
 
 /// Words a quiz may ask about: only learned ones, never the rest of the deck.
 List<Word> _targets(Mode mode) => mode == Mode.weak
-    ? {...store.mistakes.map(store.byKey).whereType<Word>(), ...store.learned.where((w) => w.weak)}.toList()
+    ? {
+        ...store.mistakes.map(store.byKey).whereType<Word>().where((w) => !w.isNew),
+        ...store.learned.where((w) => w.weak),
+      }.toList()
     : store.learned.toList();
 
 const _minLearned = 4;

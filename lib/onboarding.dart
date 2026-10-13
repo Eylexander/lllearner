@@ -63,7 +63,9 @@ class _OnboardingState extends State<Onboarding> {
                 child: PageView(
                   controller: pages,
                   onPageChanged: (p) => setState(() => page = p),
-                  children: const [_CoursePage(), _GoalPage(), _PronPage()],
+                  // Not const: identical const widgets are skipped on rebuild, so the pages
+                  // wouldn't show the choices made on them.
+                  children: [_CoursePage(), _GoalPage(), _PronPage()],
                 ),
               ),
               Padding(

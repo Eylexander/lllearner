@@ -378,8 +378,11 @@ class Store extends ChangeNotifier {
   static String _day(DateTime d) => d.toIso8601String().substring(0, 10);
   String get _today => _day(DateTime.now());
 
-  int get streak =>
-      _lastDay == _today || _lastDay == _day(DateTime.now().subtract(const Duration(days: 1))) ? _streak : 0;
+  int get streak {
+    final now = DateTime.now();
+    return _lastDay == _today || _lastDay == _day(DateTime(now.year, now.month, now.day - 1)) ? _streak : 0;
+  }
+
   bool get activeToday => _lastDay == _today;
   int get learnedToday => activeToday ? _newToday : 0;
 
@@ -405,7 +408,8 @@ class Store extends ChangeNotifier {
     final counts = List.filled(n, 0);
     for (final w in words) {
       if (w.isNew || !w.due!.isAfter(now)) continue;
-      final d = DateTime(w.due!.year, w.due!.month, w.due!.day).difference(today).inDays;
+      // Rounded: a day across a DST change lasts 23 or 25 h.
+      final d = (DateTime(w.due!.year, w.due!.month, w.due!.day).difference(today).inHours / 24).round();
       if (d < n) counts[d]++;
     }
     return counts;
@@ -550,12 +554,27 @@ Future<void> play(Word w, {bool slow = false}) => speak(w.hanzi, slow: slow);
 /// Whether the phone has a voice for the course language installed.
 Future<bool> voiceInstalled() async {
   try {
-    final ok = await tts.isLanguageAvailable(store.course.tts);
-    if (ok != true) return false;
-    return Platform.isAndroid ? await tts.isLanguageInstalled(store.course.tts) == true : true;
+    if (await tts.isLanguageAvailable(store.course.tts) != true) return false;
+    if (!Platform.isAndroid) return true;
+    // Not tts.isLanguageInstalled: it only checks the first offline voice tagged exactly zh-TW, and
+    // Google TTS lists a placeholder first ('zh-TW-language', always notInstalled) before the real
+    // voices (cmn-tw-x-ctc-local…). Say no only when none of the offline voices is downloaded.
+    final voices = [
+      for (final v in await tts.getVoices as List? ?? const [])
+        if (v is Map && _speaks('${v['locale']}', store.course.tts)) v,
+    ];
+    return voices.isEmpty ||
+        voices.any((v) => v['network_required'] != '1' && !'${v['features']}'.contains('notInstalled'));
   } catch (_) {
     return false;
   }
+}
+
+/// Whether a voice's locale is the language and region of [tag] (zh-TW matches cmn_TW, zh-Hant-TW).
+bool _speaks(String locale, String tag) {
+  const alias = {'cmn': 'zh', 'zho': 'zh', 'chi': 'zh'};
+  final v = locale.toLowerCase().replaceAll('_', '-').split('-'), t = tag.toLowerCase().split('-');
+  return (alias[v.first] ?? v.first) == t.first && (t.length < 2 || v.skip(1).contains(t[1]));
 }
 
 const android = MethodChannel('lllearner/android');

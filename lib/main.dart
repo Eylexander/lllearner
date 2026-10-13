@@ -93,13 +93,14 @@ class _ShellState extends State<Shell> {
     listenable: store,
     builder: (context, _) {
       final due = store.due.length;
-      final pages = [const LearnTab(), const ReviewTab(), const PracticeTab(), const LexiconTab(), const CoachTab()];
+      // Not const: identical const widgets are skipped on rebuild, so they wouldn't show store changes.
+      final pages = [LearnTab(), ReviewTab(), PracticeTab(), LexiconTab(), CoachTab()];
       return Scaffold(
         appBar: AppBar(
           titleSpacing: 12,
-          title: const CourseButton(),
+          title: CourseButton(),
           actions: [
-            const StreakChip(),
+            StreakChip(),
             IconButton(
               tooltip: 'Réglages',
               icon: const Icon(Icons.settings_outlined),
