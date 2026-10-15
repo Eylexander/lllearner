@@ -487,6 +487,7 @@ class Store extends ChangeNotifier {
   /// that start no word (punctuation, names) come back alone with a null word.
   // ponytail: greedy longest match, mis-splits some ambiguous runs; a word-frequency segmenter if it matters.
   List<(String, Word?)> segment(String text) {
+    if (!course.hasCharacters) return _segmentWords(text);
     final c = text.characters.toList();
     final out = <(String, Word?)>[];
     for (var i = 0; i < c.length;) {
@@ -503,6 +504,67 @@ class Store extends ChangeNotifier {
     }
     return out;
   }
+
+  /// [segment] for languages written in words (Korean): each word linked to the longest deck word it
+  /// is or starts with, the rest (particles, endings) left plain: 학교 · 에, 지내 (지내다) · 세요. One
+  /// syllable only counts alone or before a particle, since 어떻게 is not 어 'oh' + 떻게.
+  List<(String, Word?)> _segmentWords(String text) {
+    final out = <(String, Word?)>[];
+    for (final m in RegExp(r'[가-힣]+|[^가-힣]+').allMatches(text)) {
+      final run = m[0]!;
+      (String, Word)? hit;
+      for (var len = run.length; len > 0 && hit == null && RegExp(r'[가-힣]').hasMatch(run); len--) {
+        final head = run.substring(0, len), rest = run.substring(len);
+        if (len == 1 && rest.isNotEmpty && !_particles.contains(rest)) continue;
+        // A verb by its stem only when it's the start of a conjugated form (지내세요, not 지내다 itself).
+        final w = _byKey['${course.id}:$head'] ?? (rest.isEmpty ? null : _byKey['${course.id}:$head다']);
+        if (w != null) hit = (head, w);
+      }
+      if (hit case (final head, final w)) {
+        out.add((head, w));
+        if (run.length > head.length) out.add((run.substring(head.length), null));
+      } else {
+        out.add((run, null));
+      }
+    }
+    return out;
+  }
+
+  static const _particles = {
+    '은',
+    '는',
+    '이',
+    '가',
+    '을',
+    '를',
+    '에',
+    '에서',
+    '에게',
+    '한테',
+    '께',
+    '의',
+    '도',
+    '만',
+    '와',
+    '과',
+    '로',
+    '으로',
+    '랑',
+    '이랑',
+    '하고',
+    '까지',
+    '부터',
+    '보다',
+    '처럼',
+    '요',
+    '이에요',
+    '예요',
+    '이야',
+    '야',
+    '입니다',
+    '이다',
+    '들',
+  };
 
   /// Review: the learner's own grade.
   void grade(Word w, Grade g) {
@@ -656,7 +718,7 @@ bool isMissing(Map<String, String> voice) => '${voice['features']}'.contains('no
 
 /// Whether a voice's locale is the language and region of [tag] (zh-TW matches cmn_TW, zh-Hant-TW).
 bool _speaks(String locale, String tag) {
-  const alias = {'cmn': 'zh', 'zho': 'zh', 'chi': 'zh'};
+  const alias = {'cmn': 'zh', 'zho': 'zh', 'chi': 'zh', 'kor': 'ko'};
   final v = locale.toLowerCase().replaceAll('_', '-').split('-'), t = tag.toLowerCase().split('-');
   return (alias[v.first] ?? v.first) == t.first && (t.length < 2 || v.skip(1).contains(t[1]));
 }

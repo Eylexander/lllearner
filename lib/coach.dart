@@ -26,7 +26,8 @@ String importDeck(String text) {
 String get _deckFormat =>
     'Termine par un bloc de code JSON contenant un tableau des nouveaux mots, au format exact : '
     '[{"lang": "${store.course.id}", "hanzi": "…", "roman": "…", "fr": "…", "tag": "…"}] '
-    '(hanzi = l’écriture du mot, roman = ${store.course.romanization} avec tons, tag = thème court en français), '
+    '(hanzi = l’écriture du mot, roman = ${store.course.romanization}${store.course.hasTones ? ' avec tons' : ''}, '
+    'tag = thème court en français), '
     "pour que je puisse l'importer dans mon application.";
 
 String _profile() {
@@ -118,10 +119,11 @@ class _CoachTabState extends State<CoachTab> {
         _Action(
           icon: Icons.psychology,
           title: 'Expliquer mes erreurs',
-          subtitle: 'Moyens mnémotechniques, pièges de tons, exemples',
+          subtitle: 'Moyens mnémotechniques, pièges de ${c.hasTones ? 'tons' : 'prononciation'}, exemples',
           onTap: () => askAssistant(
-            'Explique-moi mes erreurs récentes et mes mots difficiles : pour chacun, un moyen mnémotechnique '
-            '(décomposition des caractères), le piège de prononciation ou de ton, et 2 phrases d’exemple. '
+            'Explique-moi mes erreurs récentes et mes mots difficiles : pour chacun, un moyen mnémotechnique'
+            '${c.hasCharacters ? ' (décomposition des caractères)' : ''}, le piège de prononciation'
+            '${c.hasTones ? ' ou de ton' : ''}, et 2 phrases d’exemple. '
             'Termine par un mini-quiz de 5 questions et attends mes réponses.',
           ),
         ),
@@ -131,7 +133,7 @@ class _CoachTabState extends State<CoachTab> {
           subtitle: 'Un court texte avec uniquement les mots que je connais',
           onTap: () => askAssistant(
             'Écris une très courte histoire (6 à 8 phrases) en utilisant presque uniquement mes derniers mots '
-            'appris et des mots plus simples. Donne chaque phrase en caractères, puis en ${c.romanization}, puis '
+            'appris et des mots plus simples. Donne chaque phrase en ${c.writing}, puis en ${c.romanization}, puis '
             'en français, et pose-moi 3 questions de compréhension à la fin.',
           ),
         ),
@@ -163,7 +165,8 @@ class _CoachTabState extends State<CoachTab> {
                           'Jouons une conversation $where. Tu joues mon interlocuteur, moi l’apprenant. Règles : une '
                           'seule réplique à la fois, simple et adaptée à mon niveau (réutilise mes mots), avec '
                           '${c.romanization} et la traduction française entre parenthèses. Après chacune de mes '
-                          'réponses, corrige brièvement mes erreurs (tons, grammaire, tournure plus naturelle) avant '
+                          'réponses, corrige brièvement mes erreurs (${c.hasTones ? 'tons, ' : ''}grammaire, tournure '
+                          'plus naturelle) avant '
                           'de continuer. Commence !',
                         ),
                       ),
@@ -198,9 +201,10 @@ class _CoachTabState extends State<CoachTab> {
                   onPressed: () {
                     if (sentence.text.trim().isEmpty) return;
                     askAssistant(
-                      'Corrige cette phrase que j’ai écrite (caractères et/ou ${c.romanization}) : '
-                      '« ${sentence.text.trim()} ». Explique les erreurs en français (tons, grammaire, mot plus '
-                      'naturel à Taïwan), donne la version la plus naturelle (caractères + ${c.romanization}) et '
+                      'Corrige cette phrase que j’ai écrite (${c.writing} et/ou ${c.romanization}) : '
+                      '« ${sentence.text.trim()} ». Explique les erreurs en français (${c.hasTones ? 'tons, ' : ''}'
+                      'grammaire, mot plus naturel ${c.region}), donne la version la plus naturelle '
+                      '(${c.writing} + ${c.romanization}) et '
                       'une variante.',
                     );
                   },
@@ -241,7 +245,7 @@ class _CoachTabState extends State<CoachTab> {
                   minLines: 3,
                   maxLines: 6,
                   decoration: InputDecoration(
-                    hintText: '[{"hanzi": "市場", "roman": "shìchǎng", "fr": "marché", …}]',
+                    hintText: '[{"hanzi": "${c.greetings[1].$1}", "roman": "${c.greetings[1].$2}", …}]',
                     border: const OutlineInputBorder(),
                     filled: true,
                     fillColor: cs.surface,

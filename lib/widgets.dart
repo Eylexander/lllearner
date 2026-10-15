@@ -4,6 +4,7 @@ import 'characters.dart';
 import 'course.dart';
 import 'details.dart';
 import 'pinyin.dart';
+import 'settings.dart';
 import 'store.dart';
 import 'theme.dart';
 
@@ -23,7 +24,7 @@ class Hanzi extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = script(size, weight: weight, color: color);
     final t = tones(roman);
-    if (!toneColors || !store.toneColors || _han.allMatches(text).length != t.length) {
+    if (!toneColors || !store.toneColors || !store.course.hasTones || _han.allMatches(text).length != t.length) {
       return Text(text, style: style, textAlign: TextAlign.center);
     }
     final palette = context.palette;
@@ -44,7 +45,7 @@ class Hanzi extends StatelessWidget {
   }
 }
 
-/// Pinyin with each syllable in its tone's color.
+/// Pinyin with each syllable in its tone's color; other romanizations as they are.
 class Roman extends StatelessWidget {
   const Roman(this.roman, {super.key, this.style, this.textAlign, this.toneColors = true});
   final String roman;
@@ -54,7 +55,9 @@ class Roman extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!toneColors || !store.toneColors) return Text(roman, style: style, textAlign: textAlign);
+    if (!toneColors || !store.toneColors || !store.course.hasTones) {
+      return Text(roman, style: style, textAlign: textAlign);
+    }
     final palette = context.palette;
     return Text.rich(
       TextSpan(
@@ -201,6 +204,15 @@ void showCourseSheet(BuildContext context) => showModalBottomSheet(
               'Chaque cours a sa propre progression. D’autres langues pourront s’ajouter ici.',
               style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Réglages'),
+            onTap: () {
+              final nav = Navigator.of(context)..pop();
+              SettingsPage.open(nav.context);
+            },
           ),
         ],
       ),
@@ -525,7 +537,7 @@ class _ExampleTileState extends State<ExampleTile> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (store.pron != Pron.zhuyin)
+                          if (store.pron != Pron.zhuyin || !store.course.hasZhuyin)
                             Text(e.roman, style: tt.bodyMedium?.copyWith(color: cs.primary)),
                           Text(e.fr, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                         ],

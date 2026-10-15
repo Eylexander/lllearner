@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lllearner/course.dart';
 import 'package:lllearner/exercise.dart';
 import 'package:lllearner/pinyin.dart';
 import 'package:lllearner/store.dart';
@@ -250,8 +251,43 @@ void main() {
     expect(s.character('x'), isNull);
   });
 
+  test('every course has its deck and what the UI indexes', () async {
+    final s = await fresh();
+    for (final c in courses) {
+      s.setCourse(c);
+      expect(s.words, isNotEmpty, reason: 'no "${c.id}" deck in dict.db');
+      expect(c.greetings, hasLength(3), reason: c.id); // morning, afternoon, evening
+      expect(c.scenarios, isNotEmpty, reason: c.id);
+    }
+  });
+
   test('plain strips tones, accents, apostrophes and spaces for search', () {
     expect(plain("Zǎo'ān Métro"), 'zaoanmetro');
     expect(plain('nǚ xièxie'), 'nuxiexie');
+  });
+
+  test('the Korean course: its deck, polite phrases first, no tone exercise', () async {
+    await store.load(dir: dir); // exercises read the global store
+    opened.add(store);
+    store.setCourse(courseById('kor'));
+    expect(store.words.length, greaterThan(9000));
+    final lesson = store.nextLesson!;
+    expect((lesson.words.first.hanzi, lesson.words.first.roman), ('안녕하세요', 'annyeonghaseyo'));
+    final pool = distractorPool(lesson.words, also: lesson.words);
+    final rng = Random(1);
+    for (final w in lesson.words) {
+      expect(makeExercise(w, Kind.tones, pool, rng), isNull);
+      expect(makeExercise(w, Kind.meaning, pool, rng)!.options, hasLength(4));
+    }
+    final go = store.byKey('kor:가다')!; // conjugated in its examples (갔어요)
+    expect(go.level, 1);
+    expect(store.examples(go), isNotEmpty);
+    expect(store.examples(go).every((e) => e.roman.isNotEmpty && e.fr.isNotEmpty), isTrue);
+    // Sentences split into words, not syllables: 어떻게 isn't 어 'oh'.
+    String seg(String s) => store.segment(s).map((p) => '${p.$1}${p.$2 == null ? '' : '*'}').join('|');
+    expect(seg('학교에 가요.'), '학교*|에| |가요*|.');
+    expect(seg('물을 마셔요'), '물*|을| |마셔요*');
+    expect(seg('어떻게 지내세요?'), isNot(startsWith('어*')));
+    expect(seg('어떻게 지내세요?'), contains('지내*|세요'));
   });
 }

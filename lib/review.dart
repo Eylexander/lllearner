@@ -265,7 +265,7 @@ class _ReviewSessionState extends State<ReviewSession> {
           title: total == 0 ? 'Tout est à jour !' : 'Révision terminée !',
           message: total == 0
               ? 'Revenez plus tard.'
-              : '$total carte${total > 1 ? 's' : ''} révisée${total > 1 ? 's' : ''}. 真棒！',
+              : '$total carte${total > 1 ? 's' : ''} révisée${total > 1 ? 's' : ''}. ${store.course.bravo}',
           actions: [
             FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Terminer')),
             if (more || canAhead)

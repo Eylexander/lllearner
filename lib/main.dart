@@ -109,19 +109,7 @@ class _ShellState extends State<Shell> {
       // Not const: identical const widgets are skipped on rebuild, so they wouldn't show store changes.
       final pages = [LearnTab(), ReviewTab(), PracticeTab(), LexiconTab(), CoachTab()];
       return Scaffold(
-        appBar: AppBar(
-          titleSpacing: 12,
-          title: CourseButton(),
-          actions: [
-            StreakChip(),
-            IconButton(
-              tooltip: 'Réglages',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => SettingsPage.open(context),
-            ),
-            const SizedBox(width: 4),
-          ],
-        ),
+        appBar: AppBar(titleSpacing: 12, title: CourseButton(), actions: [StreakChip(), const SizedBox(width: 12)]),
         body: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
           child: KeyedSubtree(key: ValueKey(tab), child: pages[tab]),

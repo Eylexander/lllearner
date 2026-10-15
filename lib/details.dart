@@ -84,10 +84,12 @@ void showWordSheet(BuildContext context, Word w) {
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-              Text('Caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
-              const SizedBox(height: 8),
-              CharacterBreakdown(w),
+              if (store.course.hasCharacters) ...[
+                const SizedBox(height: 16),
+                Text('Caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                CharacterBreakdown(w),
+              ],
               if (examples.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Text('Exemples', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),

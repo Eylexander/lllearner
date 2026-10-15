@@ -47,6 +47,7 @@ List<Word> distractorPool(Iterable<Word> targets, {Iterable<Word> also = const [
 /// pool can't provide three clearly different ones (or the word has no tone to ask).
 Exercise? makeExercise(Word w, Kind kind, List<Word> pool, Random rng, {Set<Word> familiar = const {}}) {
   if (kind == Kind.tones) {
+    if (!store.course.hasTones) return null;
     final wrong = toneVariants(w.roman, 3, rng);
     if (wrong.length < 3) return null;
     return Exercise(w, kind, [Option(w.roman, word: w, correct: true), for (final r in wrong) Option(r)]..shuffle(rng));

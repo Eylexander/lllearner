@@ -181,21 +181,30 @@ class _PronPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final sample = Word(store.course.id, '你好', 'nǐ hǎo', 'Bonjour', '', zhuyin: 'ㄋㄧˇ ㄏㄠˇ');
+    final c = store.course;
+    final (hello, roman, fr) = c.greetings[1];
+    final sample = c.hasZhuyin
+        ? Word(c.id, '你好', 'nǐ hǎo', 'Bonjour', '', zhuyin: 'ㄋㄧˇ ㄏㄠˇ')
+        : Word(c.id, hello, roman, fr, '');
     return _Page(
       title: 'La prononciation',
-      subtitle: 'Le pinyin utilise l’alphabet latin ; le zhuyin (ㄅㄆㄇ) est le système utilisé à Taïwan.',
+      subtitle: c.hasZhuyin
+          ? 'Le pinyin utilise l’alphabet latin ; le zhuyin (ㄅㄆㄇ) est le système utilisé à Taïwan.'
+          : 'Sous chaque mot, sa ${c.romanization} en alphabet latin : une aide pour débuter, '
+                'le temps d’apprendre le ${c.writing}.',
       children: [
-        SegmentedButton<Pron>(
-          segments: const [
-            ButtonSegment(value: Pron.pinyin, label: Text('Pinyin')),
-            ButtonSegment(value: Pron.zhuyin, label: Text('Zhuyin')),
-            ButtonSegment(value: Pron.both, label: Text('Les deux')),
-          ],
-          selected: {store.pron},
-          onSelectionChanged: (s) => store.set(() => store.pron = s.first),
-        ),
-        const SizedBox(height: 20),
+        if (c.hasZhuyin) ...[
+          SegmentedButton<Pron>(
+            segments: const [
+              ButtonSegment(value: Pron.pinyin, label: Text('Pinyin')),
+              ButtonSegment(value: Pron.zhuyin, label: Text('Zhuyin')),
+              ButtonSegment(value: Pron.both, label: Text('Les deux')),
+            ],
+            selected: {store.pron},
+            onSelectionChanged: (s) => store.set(() => store.pron = s.first),
+          ),
+          const SizedBox(height: 20),
+        ],
         Card(
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -220,13 +229,14 @@ class _PronPage extends StatelessWidget {
             ),
           ),
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Couleurs des tons'),
-          subtitle: const Text('Chaque ton a sa couleur, pour mieux les retenir'),
-          value: store.toneColors,
-          onChanged: (v) => store.set(() => store.toneColors = v),
-        ),
+        if (c.hasTones)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Couleurs des tons'),
+            subtitle: const Text('Chaque ton a sa couleur, pour mieux les retenir'),
+            value: store.toneColors,
+            onChanged: (v) => store.set(() => store.toneColors = v),
+          ),
         FutureBuilder(
           future: voiceInstalled(),
           builder: (context, snap) => snap.data == false

@@ -48,7 +48,9 @@ class _LexiconTabState extends State<LexiconTab> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: SearchBar(
-            hintText: 'Caractères, pinyin ou français',
+            hintText:
+                '${store.course.writing[0].toUpperCase()}${store.course.writing.substring(1)}, '
+                '${store.course.romanization} ou français',
             leading: const Icon(Icons.search),
             elevation: const WidgetStatePropertyAll(0),
             onChanged: (v) => setState(() => q = v),
@@ -87,8 +89,7 @@ class _LexiconTabState extends State<LexiconTab> {
                       return Padding(
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                         child: Text(
-                          '${list.length} mots · listes TOCFL · traductions CFDICT (CC BY-SA 3.0, chine-informations.com) '
-                          '· exemples Tatoeba (CC BY 2.0 FR, tatoeba.org) · caractères Make Me a Hanzi (LGPL 3)',
+                          '${list.length} mots · ${store.course.sources}',
                           style: tt.labelSmall?.copyWith(color: cs.outline),
                         ),
                       );

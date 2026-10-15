@@ -76,7 +76,7 @@ class PracticeTab extends StatelessWidget {
             style: tt.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
           ),
         ),
-        for (final mode in Mode.values) ...[
+        for (final mode in Mode.values.where((m) => m != Mode.tones || store.course.hasTones)) ...[
           () {
             final n = _targets(mode).length;
             final ok = mode == Mode.weak ? n > 0 : true;
@@ -204,7 +204,7 @@ class _QuizSessionState extends State<QuizSession> {
           const SizedBox(height: 20),
           Text(
             pct >= .8
-                ? 'Excellent ! 太棒了！'
+                ? 'Excellent ! ${store.course.bravo}'
                 : pct >= .5
                 ? 'Pas mal, continuez !'
                 : 'On révise et on recommence !',

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'course.dart';
 import 'store.dart';
 import 'theme.dart';
-import 'widgets.dart';
 
 /// Whether the platform provides wallpaper colors (Android 12+); set by the app.
 bool dynamicColorAvailable = false;
@@ -29,53 +29,48 @@ class SettingsPage extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.only(bottom: 32),
           children: [
-            header('Cours'),
-            ListTile(
-              leading: CourseAvatar(store.course),
-              title: Text(store.course.name),
-              subtitle: const Text('Changer de cours'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => showCourseSheet(context),
-            ),
             header('Apprentissage'),
             const ListTile(title: Text('Objectif quotidien'), subtitle: Text('Nouveaux mots à apprendre chaque jour')),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: GoalPicker(value: store.dailyGoal, onChanged: (n) => store.set(() => store.dailyGoal = n)),
             ),
-            const ListTile(title: Text('Prononciation affichée')),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: SegmentedButton<Pron>(
-                segments: const [
-                  ButtonSegment(value: Pron.pinyin, label: Text('Pinyin')),
-                  ButtonSegment(value: Pron.zhuyin, label: Text('Zhuyin')),
-                  ButtonSegment(value: Pron.both, label: Text('Les deux')),
-                ],
-                selected: {store.pron},
-                onSelectionChanged: (s) => store.set(() => store.pron = s.first),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              title: const Text('Couleurs des tons'),
-              subtitle: Row(
-                children: [
-                  for (final (i, s) in ['1er', '2e', '3e', '4e', 'neutre'].indexed) ...[
-                    Text(
-                      s,
-                      style: TextStyle(color: palette.tones[i], fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(width: 10),
+            if (store.course.hasZhuyin) ...[
+              const ListTile(title: Text('Prononciation affichée')),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SegmentedButton<Pron>(
+                  segments: const [
+                    ButtonSegment(value: Pron.pinyin, label: Text('Pinyin')),
+                    ButtonSegment(value: Pron.zhuyin, label: Text('Zhuyin')),
+                    ButtonSegment(value: Pron.both, label: Text('Les deux')),
                   ],
-                ],
+                  selected: {store.pron},
+                  onSelectionChanged: (s) => store.set(() => store.pron = s.first),
+                ),
               ),
-              value: store.toneColors,
-              onChanged: (v) => store.set(() => store.toneColors = v),
-            ),
+              const SizedBox(height: 8),
+            ],
+            if (store.course.hasTones)
+              SwitchListTile(
+                title: const Text('Couleurs des tons'),
+                subtitle: Row(
+                  children: [
+                    for (final (i, s) in ['1er', '2e', '3e', '4e', 'neutre'].indexed) ...[
+                      Text(
+                        s,
+                        style: TextStyle(color: palette.tones[i], fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                  ],
+                ),
+                value: store.toneColors,
+                onChanged: (v) => store.set(() => store.toneColors = v),
+              ),
             SwitchListTile(
               title: const Text('Aide à la prononciation'),
-              subtitle: Text('Afficher le ${store.course.romanization} dans les exercices'),
+              subtitle: Text('Afficher la prononciation (${store.course.romanization}) dans les exercices'),
               value: store.hints,
               onChanged: (v) => store.set(() => store.hints = v),
             ),
@@ -206,11 +201,9 @@ class SettingsPage extends StatelessWidget {
             header('À propos'),
             ListTile(
               title: const Text('Sources et licences'),
-              subtitle: const Text(
-                'Vocabulaire : listes TOCFL. Traductions : CFDICT (CC BY-SA 3.0, chine-informations.com). '
-                'Exemples : Tatoeba (CC BY 2.0 FR, tatoeba.org). '
-                'Formation des caractères : Make Me a Hanzi (LGPL 3, github.com/skishore/makemeahanzi). '
-                'Code source : github.com/Eylexander/LLLearner. ',
+              subtitle: Text(
+                '${[for (final c in courses) '${c.name} : ${c.sources}.'].join(' ')} '
+                'Code source : github.com/Eylexander/LLLearner.',
               ),
               isThreeLine: true,
               onTap: () => showLicensePage(context: context, applicationName: 'LLLearner'),
@@ -268,7 +261,8 @@ void _showVoices(BuildContext context) {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
                   child: Text(
-                    'Touchez une voix pour l’écouter : certaines rendent mieux les tons que d’autres.',
+                    'Touchez une voix pour l’écouter : certaines rendent mieux '
+                    '${store.course.hasTones ? 'les tons' : 'la prononciation'} que d’autres.',
                     style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                 ),

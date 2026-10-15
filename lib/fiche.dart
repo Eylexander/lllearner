@@ -19,8 +19,9 @@ class LessonFiche extends StatelessWidget {
     final c = store.course;
     final words = lesson.words.map((w) => '${w.hanzi} (${w.roman}, « ${w.fr} »)').join(', ');
     return 'Je vais apprendre cette leçon : $words. Fais-m’en une fiche complète à lire avant le quiz : pour '
-        'chaque mot, son sens et ses usages, la décomposition de ses caractères, les pièges de ton ou de '
-        'prononciation et 2 phrases d’exemple (caractères, ${c.romanization}, français) ; puis les points de '
+        'chaque mot, son sens et ses usages, ${c.hasCharacters ? 'la décomposition de ses caractères, ' : ''}'
+        'les pièges de ${c.hasTones ? 'ton ou de ' : ''}prononciation et 2 phrases d’exemple (${c.writing}, '
+        '${c.romanization}, français) ; puis les points de '
         'grammaire utiles, un court dialogue qui emploie tous ces mots, et 3 questions de compréhension '
         'auxquelles je répondrai.';
   }
@@ -37,8 +38,9 @@ class LessonFiche extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
             child: Text(
-              'Fiche de leçon : lisez et écoutez chaque mot avant le quiz. Touchez un caractère pour voir comment '
-              'il est formé, et un mot des exemples pour le décortiquer.',
+              'Fiche de leçon : lisez et écoutez chaque mot avant le quiz. Touchez '
+              '${store.course.hasCharacters ? 'un caractère pour voir comment il est formé, et ' : ''}'
+              'un mot des exemples pour le décortiquer.',
               style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
             ),
           ),

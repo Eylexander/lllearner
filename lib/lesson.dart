@@ -80,7 +80,7 @@ class _LessonPageState extends State<LessonPage> {
     }
   }
 
-  Kind _ear() => rng.nextBool() ? Kind.listen : Kind.tones;
+  Kind _ear() => store.course.hasTones && rng.nextBool() ? Kind.tones : Kind.listen;
 
   /// Shuffled exercises; a kind the word can't have (no tone, too few distractors)
   /// falls back to a meaning question, and is dropped if even that is impossible.
@@ -215,6 +215,8 @@ class _TipView extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final palette = context.palette;
+    // Tone colors only where they mean a tone (the Mandarin tips list the four in order).
+    Color color(int n) => store.course.hasTones ? palette.tones[min(n, 4)] : cs.primary;
     return Column(
       children: [
         Expanded(
@@ -241,8 +243,8 @@ class _TipView extends StatelessWidget {
                       ListTile(
                         onTap: () => speak(e.hanzi),
                         leading: CircleAvatar(
-                          backgroundColor: palette.tones[min(n, 4)].withValues(alpha: 0.15),
-                          child: Text(e.hanzi, style: script(20, color: palette.tones[min(n, 4)])),
+                          backgroundColor: color(n).withValues(alpha: 0.15),
+                          child: Text(e.hanzi, style: script(20, color: color(n))),
                         ),
                         title: Row(
                           children: [
@@ -333,10 +335,12 @@ class _IntroViewState extends State<_IntroView> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              Text('Les caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
-              const SizedBox(height: 8),
-              CharacterBreakdown(w),
+              if (store.course.hasCharacters) ...[
+                const SizedBox(height: 20),
+                Text('Les caractères', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                CharacterBreakdown(w),
+              ],
               if (example != null) ...[
                 const SizedBox(height: 20),
                 Text('En contexte', style: tt.titleSmall?.copyWith(color: cs.onSurfaceVariant)),

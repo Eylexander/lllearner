@@ -138,7 +138,11 @@ class _TodayCard extends StatelessWidget {
                 label: const Text('Lire la fiche de la leçon d’abord'),
               )
             else
-              Text('Vous avez appris tout le cours. 太厲害了！', style: tt.titleMedium, textAlign: TextAlign.center),
+              Text(
+                'Vous avez appris tout le cours. ${store.course.bravo}',
+                style: tt.titleMedium,
+                textAlign: TextAlign.center,
+              ),
             if (due > 0) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
